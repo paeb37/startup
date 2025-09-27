@@ -12,24 +12,46 @@ using P = DocumentFormat.OpenXml.Presentation;
 
 public static partial class Program
 {
-    private static byte[] CreateSanitizedCopy(Stream originalStream, DeckDto deck, RedactionRules rules)
+    private static byte[] CreateSanitizedCopy(Stream originalStream, DeckDto deck, IReadOnlyList<ActionDto> actions)
     {
         var working = new MemoryStream();
         originalStream.Position = 0;
         originalStream.CopyTo(working);
         working.Position = 0;
 
+        if (actions == null || actions.Count == 0)
+        {
+            return working.ToArray();
+        }
+
         using (var document = PresentationDocument.Open(working, true))
         {
             var presentationPart = document.PresentationPart ?? throw new InvalidOperationException("Invalid PPTX (no PresentationPart)");
             var slidePartsByUri = presentationPart.SlideParts.ToDictionary(sp => sp.Uri.OriginalString.TrimStart('/'));
 
-            var touchedSlides = new HashSet<P.Slide>();
-            var patterns = BuildPatterns(rules);
-            if (patterns.Count == 0)
+            var replaceActions = new List<(ActionDto action, List<(Regex regex, string label, string replacement)> patterns)>();
+            var scratchWarnings = new List<string>();
+
+            foreach (var action in actions)
+            {
+                if (action is null) continue;
+                if (!string.Equals(action.Type?.Trim(), "replace", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var replacement = string.IsNullOrWhiteSpace(action.Replacement) ? "[REDACTED]" : action.Replacement!;
+                var patterns = BuildPatternsForAction(action, replacement, scratchWarnings);
+                if (patterns.Count > 0)
+                {
+                    replaceActions.Add((action, patterns));
+                }
+            }
+
+            if (replaceActions.Count == 0)
             {
                 return working.ToArray();
             }
+
+            var touchedSlides = new HashSet<P.Slide>();
 
             foreach (var slide in deck.slides)
             {
@@ -42,22 +64,32 @@ public static partial class Program
                     if (!slidePartsByUri.TryGetValue(keyParts[0], out var slidePart) || slidePart.Slide == null) continue;
 
                     var slideDom = slidePart.Slide;
+                    bool modified = false;
 
-                    bool modified = element switch
+                    foreach (var (action, patterns) in replaceActions)
                     {
-                        TextboxDto textbox => ApplyPatternsToTextbox(slideDom, textbox, patterns),
-                        TableDto table => ApplyPatternsToTable(slideDom, table, patterns),
-                        _ => false
-                    };
+                        var totalSlides = deck.slideCount > 0 ? deck.slideCount : deck.slides.Count;
+                        if (!ShouldApplyToSlide(action.Scope, slide.index, totalSlides))
+                            continue;
+
+                        modified |= element switch
+                        {
+                            TextboxDto textbox => ApplyPatternsToTextbox(slideDom, textbox, patterns),
+                            TableDto table => ApplyPatternsToTable(slideDom, table, patterns),
+                            _ => false
+                        };
+                    }
 
                     if (modified)
+                    {
                         touchedSlides.Add(slideDom);
+                    }
                 }
             }
 
-            foreach (var slide in touchedSlides)
+            foreach (var slideDom in touchedSlides)
             {
-                slide.Save();
+                slideDom.Save();
             }
         }
 
