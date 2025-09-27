@@ -95,6 +95,7 @@ public static partial class Program
                 };
 
                 var artifacts = await PersistArtifactsAsync(ms, deck, jsonOptions, file.FileName, storageRoot);
+                var deckIdForAnnotation = artifacts.BaseName;
 
                 if (!System.IO.File.Exists(artifacts.PdfPath))
                     return Results.StatusCode(500);
@@ -146,6 +147,7 @@ public static partial class Program
 
                 var payload = new
                 {
+                    deckId = deckIdForAnnotation,
                     instructions
                 };
 
@@ -159,15 +161,15 @@ public static partial class Program
 
                     if (response.IsSuccessStatusCode)
                     {
-                        var ruleResponse = JsonSerializer.Deserialize<AnnotateResponse>(responseBody, jsonOptions);
+                        var annotation = JsonSerializer.Deserialize<AnnotationResponse>(responseBody, jsonOptions);
 
-                        if (ruleResponse?.Rules is null)
+                        if (annotation?.Actions is null)
                         {
                             return Results.Text(JsonSerializer.Serialize(new
                             {
                                 deck,
                                 pdf = pdfInfo,
-                                redaction = new
+                                annotation = new
                                 {
                                     error = "semantic_service_invalid_response",
                                     body = responseBody
@@ -175,9 +177,8 @@ public static partial class Program
                             }, jsonOptions), "application/json");
                         }
 
-                        ruleResponse.Rules.Keywords ??= new List<string>();
-
-                        var redactions = ApplyRedactions(deck, ruleResponse.Rules);
+                        var actions = annotation.Actions;
+                        var redactions = ApplyActions(deck, actions, out var actionWarnings);
 
                         var stats = new
                         {
@@ -185,11 +186,25 @@ public static partial class Program
                             modifiedSlides = redactions.Select(r => r.Slide).Distinct().Order().ToArray()
                         };
 
+                        var meta = annotation.Meta != null
+                            ? new Dictionary<string, object?>(annotation.Meta)
+                            : new Dictionary<string, object?>();
+
+                        if (!string.IsNullOrWhiteSpace(annotation.DeckId))
+                        {
+                            meta["deckId"] = annotation.DeckId;
+                        }
+
+                        if (actionWarnings.Count > 0)
+                        {
+                            meta["pipelineWarnings"] = actionWarnings;
+                        }
+
                         object? exportInfo;
                         try
                         {
                             ms.Position = 0;
-                            var sanitizedBytes = CreateSanitizedCopy(ms, deck, ruleResponse.Rules);
+                            var sanitizedBytes = CreateSanitizedCopy(ms, deck, actions);
                             var sanitizedBase64 = Convert.ToBase64String(sanitizedBytes);
                             var sanitizedFile = Path.GetFileNameWithoutExtension(deck.file) + "_redacted.pptx";
                             exportInfo = new
@@ -210,12 +225,13 @@ public static partial class Program
                         var result = new
                         {
                             instructions,
-                            rules = ruleResponse.Rules,
+                            actions,
                             deck,
                             redactions,
                             stats,
                             export = exportInfo,
-                            pdf = pdfInfo
+                            pdf = pdfInfo,
+                            meta
                         };
 
                         return Results.Text(JsonSerializer.Serialize(result, jsonOptions), "application/json");
@@ -225,7 +241,7 @@ public static partial class Program
                     {
                         deck,
                         pdf = pdfInfo,
-                        redaction = new
+                        annotation = new
                         {
                             error = "semantic_service_failed",
                             status = (int)response.StatusCode,
@@ -239,7 +255,7 @@ public static partial class Program
                     {
                         deck,
                         pdf = pdfInfo,
-                        redaction = new
+                        annotation = new
                         {
                             error = "semantic_service_unavailable",
                             detail = httpEx.Message

@@ -28,7 +28,7 @@ Return exactly one action inside the array, following this shape:
       },
       "match": {
         "mode": "keyword" | "regex",
-        "tokens": ["Acme"],
+        "tokens": ["<keyword>"],
         "pattern": "\\$\\d[\\d,]*"
       },
       "replacement": "[CLIENT]",
@@ -46,6 +46,7 @@ Rules:
 - Always return exactly one action. No additional array items.
 - If type == "replace": include a non-empty "replacement" string and omit the "rewrite" object.
 - If type == "rewrite": include a "rewrite" object with at least "maxLengthRatio" and omit the "replacement" field.
+- Populate tokens/patterns only with values inferred from the user instruction or provided context. Never reuse the placeholder "<keyword>" unless the user explicitly says so.
 - Omit fields that are not relevant, but never invent new keys.
 - If you are unsure how to fulfill the request, return "actions": [] and explain in meta.notes."""
 
