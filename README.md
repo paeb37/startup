@@ -29,8 +29,8 @@ dotnet run --project apps/api-dotnet/Dexter.WebApi.csproj
 ```
 
 ## Endpoints
-- `POST /api/extract` — accepts multipart field `file` with a `.pptx`; optional `instructions` text is forwarded to Flask for rule inference before local redaction.
-- `POST /api/render` — accepts multipart field `file`, converts the deck to PDF for inline viewing; requires LibreOffice.
+- `POST /api/upload` — accepts multipart field `file` (optional `instructions`); stores the artifacts under `apps/storage/<name>/` and returns deck JSON alongside a base64-encoded PDF preview.
+- `POST /api/render` — accepts multipart field `file`, converts the deck to PDF for inline viewing; requires LibreOffice. (Primarily kept for tooling—`/api/upload` already returns the PDF.)
 
 ### Instruction Parser (Flask)
 ```bash
@@ -43,8 +43,14 @@ FLASK_APP=app.py flask run --host 0.0.0.0 --port 8000 --debug
 
 ### Quick test
 ```bash
-curl -F "file=@/absolute/path/to/deck.pptx" http://localhost:5100/api/extract
-curl -F "file=@/absolute/path/to/deck.pptx" -F "instructions=Redact client names and revenue" http://localhost:5100/api/extract
+curl -H "Accept: application/json" \
+     -F "file=@/absolute/path/to/deck.pptx" \
+     http://localhost:5100/api/upload
+
+curl -H "Accept: application/json" \
+     -F "file=@/absolute/path/to/deck.pptx" \
+     -F "instructions=Redact client names and revenue" \
+     http://localhost:5100/api/upload
 ```
 
 Example response:

@@ -4,7 +4,7 @@
 Run this script manually while iterating on prompt design.  It reads
 instructions from the command line (or stdin), builds a structured request
 for the Responses API, and prints the parsed JSON response.  A trimmed deck
-context file (JSON produced from /api/extract) can be passed to give the LLM
+context file (JSON produced from /api/upload) can be passed to give the LLM
 more signal when resolving ambiguous references such as "the client".
 
 Usage examples:
@@ -157,7 +157,7 @@ def load_context(path: Optional[str]) -> Optional[Dict[str, Any]]:
         data = json.load(fh)
 
     # Keep the context small to reduce token usage.
-    # Expecting a dict with keys like {"slides": [...]} from /api/extract.
+    # Expecting a dict with keys like {"slides": [...]} from /api/upload.
     return data
 
 
@@ -173,7 +173,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     '''
     parser.add_argument(
         "--context",
-        help="Optional path to JSON snippet (e.g., trimmed /api/extract output)",
+        help="Optional path to JSON snippet (e.g., trimmed /api/upload output)",
     )
     parser.add_argument(
         "--model",
@@ -193,4 +193,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
