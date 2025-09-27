@@ -150,7 +150,7 @@ public static partial class Program
 
                 var payload = new
                 {
-                    deckId = deckIdForAnnotation,
+                    deckId = deckId,
                     instructions
                 };
 
