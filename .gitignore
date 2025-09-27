@@ -1,0 +1,14 @@
+# node
+**/node_modules
+**/dist
+
+# dotnet
+**/bin
+**/obj
+
+# python
+__pycache__
+.venv
+
+# misc
+.DS_Store
