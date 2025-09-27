@@ -1,14 +1,29 @@
 # node
 **/node_modules
 **/dist
+npm-debug.log*
+yarn-error.log
+pnpm-lock.yaml
+.vite/
 
 # dotnet
 **/bin
 **/obj
+.vs/
+*.user
 
 # python
 __pycache__
 .venv
+*.pyc
+.pytest_cache/
+.mypy_cache/
 
 # misc
 .DS_Store
+Thumbs.db
+*.log
+tmp/
+*.pdf
+.env
+.env.*
