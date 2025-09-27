@@ -2,33 +2,24 @@ import re
 from typing import Dict, List, Optional
 
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from pydantic import BaseModel, ValidationError
 
-
-class Payload(BaseModel):
-    instructions: Optional[str] = None
-
-
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # dev-friendly CORS
 
-
-@app.post("/annotate")
-def annotate():
+@app.post("/api/chat")
+def chat():
     try:
-        data = request.get_json(force=True, silent=False)
-        payload = Payload.model_validate(data)
-    except ValidationError as exc:
-        return jsonify({"error": "bad payload", "details": exc.errors()}), 400
+        data = request.get_json(force=True, silent=False) or {}
+        text = (data.get("message") or "").strip()
+        if not text:
+            return jsonify({"error": "message required"}), 400
+        return jsonify({
+            "reply": f"{text} noted"  # trivial echo + "noted"
+        })
     except Exception as ex:
         return jsonify({"error": f"invalid JSON: {ex}"}), 400
-
-    instructions = (payload.instructions or "").strip()
-    rules = interpret_instructions(instructions)
-
-    return jsonify({
-        "instructions": instructions,
-        "rules": rules
-    })
 
 
 def interpret_instructions(instructions: str) -> Dict[str, object]:
