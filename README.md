@@ -20,6 +20,12 @@ The default launch profile exposes `http://localhost:5100`.
 - `applicationUrl`: `http://localhost:5100`
 - `SEMANTIC_URL`: `http://localhost:8000` (placeholder for future semantic services)
 - `SOFFICE_PATH`: `/Applications/LibreOffice.app/Contents/MacOS/soffice`
+- `SUPABASE_URL`: base URL of your Supabase instance (e.g. `https://abc.supabase.co`)
+- `SUPABASE_SERVICE_ROLE_KEY`: service role API key used for inserts
+- `OPENAI_API_KEY`: key used for slide embeddings (optional but recommended)
+- `OPENAI_EMBEDDING_MODEL`: embedding model name (defaults to `text-embedding-3-small`)
+- `SUPABASE_DECKS_TABLE`: override for the decks table name (defaults to `decks`)
+- `SUPABASE_SLIDES_TABLE`: override for the slides table name (defaults to `slides`)
 
 Override any value before running if your setup differs:
 
@@ -31,6 +37,43 @@ dotnet run --project apps/api-dotnet/Dexter.WebApi.csproj
 ## Endpoints
 - `POST /api/upload` — accepts multipart field `file` (optional `instructions`); stores the artifacts under `apps/storage/<name>/` and returns deck JSON alongside a base64-encoded PDF preview.
 - `POST /api/render` — accepts multipart field `file`, converts the deck to PDF for inline viewing; requires LibreOffice. (Primarily kept for tooling—`/api/upload` already returns the PDF.)
+
+### Supabase schema
+
+Enable the `vector` extension once, then create the tables expected by `/api/upload`:
+
+```sql
+create extension if not exists vector;
+
+create table if not exists decks (
+  id uuid primary key,
+  deck_name text not null,
+  original_filename text not null,
+  pptx_path text not null,
+  json_path text not null,
+  pdf_path text not null,
+  pdf_url text not null,
+  instructions text,
+  slide_count integer not null,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists slides (
+  id uuid primary key,
+  deck_id uuid references decks(id) on delete cascade,
+  slide_no integer not null,
+  content text,
+  embedding vector(1536),
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists slides_deck_id_slide_no_idx on slides(deck_id, slide_no);
+create index if not exists slides_embedding_idx on slides using ivfflat (embedding vector_l2_ops) with (lists = 100);
+```
+
+Grant your service role access to both tables, or configure Supabase Row Level Security policies as needed for your workflow.
 
 ### Instruction Parser (Flask)
 ```bash
