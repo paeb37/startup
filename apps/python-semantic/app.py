@@ -16,13 +16,38 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
-SYSTEM_PROMPT = """You are an assistant that converts redaction instructions into structured rules. Respond with JSON matching:
+SYSTEM_PROMPT = """You translate natural-language redaction instructions into structured JSON.
+Return exactly one action inside the array, following this shape:
 {
-  "targetClients": ["Acme Incorporated"],
-  "replacementToken": "[REDACTED_CLIENT]",
-  "notes": "optional clarification"
+  "actions": [
+    {
+      "id": "example-action",
+      "type": "replace" | "rewrite",
+      "scope": {
+        "slides": { "from": 1, "to": 5 } | { "list": [1, 3] } | {}
+      },
+      "match": {
+        "mode": "keyword" | "regex",
+        "tokens": ["Acme"],
+        "pattern": "\\$\\d[\\d,]*"
+      },
+      "replacement": "[CLIENT]",
+      "rewrite": {
+        "instructions": "Summarize in two sentences.",
+        "maxLengthRatio": 1.0
+      }
+    }
+  ],
+  "meta": {
+    "notes": "optional clarifications"
+  }
 }
-Only include clients explicitly referenced. Leave targetClients empty if unsure."""
+Rules:
+- Always return exactly one action. No additional array items.
+- If type == "replace": include a non-empty "replacement" string and omit the "rewrite" object.
+- If type == "rewrite": include a "rewrite" object with at least "maxLengthRatio" and omit the "replacement" field.
+- Omit fields that are not relevant, but never invent new keys.
+- If you are unsure how to fulfill the request, return "actions": [] and explain in meta.notes."""
 
 '''
 @app.post("/api/chat")
@@ -40,37 +65,62 @@ def chat():
 '''
 
 class Payload(BaseModel):
+    deckId: Optional[str] = None
     instructions: Optional[str] = None
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-def interpret_instructions(instructions: str) -> Dict[str, object]:
-    low = instructions.lower()
-    mask_client_names = "client" in low and "name" in low
-    mask_revenue = any(token in low for token in ("revenue", "figure", "amount", "sales"))
-    mask_emails = "email" in low or "mail" in low
+def interpret_instructions(instructions: str) -> List[Dict[str, object]]:
+    """Heuristic fallback: derive simple replace actions."""
 
-    keywords: List[str] = []
+    actions: List[Dict[str, object]] = []
+    if not instructions.strip():
+        return actions
+
+    low = instructions.lower()
 
     quoted = re.findall(r'"([^"\\]+)"', instructions)
-    if quoted:
-        keywords.extend(quoted)
-    else:
+    keywords = [kw.strip() for kw in quoted if kw.strip()]
+
+    if not keywords:
         redact_chunks = re.findall(r"redact ([^.]+)", low)
         for chunk in redact_chunks:
-            tokens = [token.strip() for token in re.split(r",|and", chunk) if token.strip()]
-            keywords.extend(tokens)
+            for part in re.split(r",|and", chunk):
+                part = part.strip()
+                if part:
+                    keywords.append(part)
 
-    keywords = [kw for kw in {kw.strip(): None for kw in keywords}.keys() if kw]
+    dedup_keywords = list(dict.fromkeys(keywords))
+    if dedup_keywords:
+        actions.append(
+            {
+                "id": "replace-keywords",
+                "type": "replace",
+                "scope": {},
+                "match": {
+                    "mode": "keyword",
+                    "tokens": dedup_keywords,
+                },
+                "replacement": "[REDACTED]",
+            }
+        )
 
-    return {
-        "maskClientNames": mask_client_names,
-        "maskRevenue": mask_revenue,
-        "maskEmails": mask_emails,
-        "keywords": keywords,
-        "replacementToken": "[REDACTED]"
-    }
+    if any(token in low for token in ("revenue", "figure", "amount", "sales")):
+        actions.append(
+            {
+                "id": "replace-numbers",
+                "type": "replace",
+                "scope": {},
+                "match": {
+                    "mode": "regex",
+                    "pattern": r"\b\$?\d[\d,]*(?:\.\d+)?\b",
+                },
+                "replacement": "[AMOUNT]",
+            }
+        )
+
+    return actions
 
 
 def build_user_prompt(instructions: str) -> str:
@@ -83,7 +133,7 @@ def build_user_prompt(instructions: str) -> str:
     return "\n".join(prompt_parts)
 
 
-def call_responses_api(instructions: str) -> Tuple[Optional[Dict[str, object]], Dict[str, object]]:
+def call_responses_api(instructions: str) -> Tuple[Dict[str, object], Dict[str, object]]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
@@ -104,7 +154,7 @@ def call_responses_api(instructions: str) -> Tuple[Optional[Dict[str, object]], 
     )
     latency = perf_counter() - started
 
-    meta = {"model": model, "responseSeconds": round(latency, 3)}
+    meta = {"source": "llm", "model": model, "responseSeconds": round(latency, 3)}
 
     try:
         parsed = json.loads(response.output_text)
@@ -112,6 +162,31 @@ def call_responses_api(instructions: str) -> Tuple[Optional[Dict[str, object]], 
         raise RuntimeError(f"invalid JSON from model: {exc}")
 
     return parsed, meta
+
+
+def _select_valid_action(actions: List[Dict[str, object]]) -> Optional[Dict[str, object]]:
+    """Pick the first action that satisfies type-specific requirements."""
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+
+        action_type = action.get("type")
+        if action_type == "replace":
+            replacement = action.get("replacement")
+            if isinstance(replacement, str) and replacement.strip():
+                # Ensure rewrite block is absent
+                action = dict(action)
+                action.pop("rewrite", None)
+                return action
+        elif action_type == "rewrite":
+            rewrite = action.get("rewrite")
+            if isinstance(rewrite, dict) and "maxLengthRatio" in rewrite:
+                action = dict(action)
+                action.pop("replacement", None)
+                return action
+
+    return None
 
 
 @app.post("/annotate")
@@ -125,35 +200,32 @@ def annotate():
         return jsonify({"error": f"invalid JSON: {ex}"}), 400
 
     instructions = (payload.instructions or "").strip()
-    rules = interpret_instructions(instructions)
-    llm_meta: Dict[str, object] = {}
+
+    actions = interpret_instructions(instructions)
+    meta: Dict[str, object] = {"source": "heuristic" if actions else "none"}
 
     if instructions:
         try:
-            llm_result, meta = call_responses_api(instructions)
-            llm_meta = meta
+            llm_result, llm_meta = call_responses_api(instructions)
             if isinstance(llm_result, dict):
-                targets = llm_result.get("targetClients") or []
-                replacement = llm_result.get("replacementToken") or rules.get("replacementToken")
-
-                if targets:
-                    rules["keywords"] = [t for t in targets if isinstance(t, str) and t.strip()]
-                    if rules["keywords"]:
-                        rules["maskClientNames"] = True
-
-                if replacement:
-                    rules["replacementToken"] = replacement
-
-                notes = llm_result.get("notes")
-                if notes:
-                    llm_meta["notes"] = notes
+                llm_actions = llm_result.get("actions")
+                if isinstance(llm_actions, list) and llm_actions:
+                    validated = _select_valid_action(llm_actions)
+                    if validated is not None:
+                        actions = [validated]
+                        meta = {}
+                llm_meta_payload = llm_result.get("meta")
+                if isinstance(llm_meta_payload, dict):
+                    llm_meta.update(llm_meta_payload)
+            meta.update(llm_meta)
         except Exception as ex:
-            llm_meta = {"error": str(ex)}
+            meta = {"source": "fallback", "error": str(ex)}
 
     return jsonify({
         "instructions": instructions,
-        "rules": rules,
-        "meta": llm_meta
+        "deckId": payload.deckId,
+        "actions": actions,
+        "meta": meta
     })
 
 

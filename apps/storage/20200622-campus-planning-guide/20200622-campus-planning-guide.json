@@ -1,0 +1,3630 @@
+{
+  "file": "20200622-campus-planning-guide.pptx",
+  "slideCount": 17,
+  "slides": [
+    {
+      "index": 0,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Convened by:"
+            },
+            {
+              "level": 1,
+              "text": "The State Board for Community and Technical Colleges"
+            },
+            {
+              "level": 1,
+              "text": "The Council of Presidents"
+            },
+            {
+              "level": 1,
+              "text": "The Independent Colleges of Washington"
+            }
+          ],
+          "key": "ppt/slides/slide1.xml#textbox:3",
+          "id": 3,
+          "name": "Text Placeholder 2",
+          "bbox": {
+            "x": 7179764,
+            "y": 4626521,
+            "w": 3884004,
+            "h": 327148
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Higher Education Re-Opening Workgroup"
+            }
+          ],
+          "key": "ppt/slides/slide1.xml#textbox:4",
+          "id": 4,
+          "name": "Subtitle 3",
+          "bbox": {
+            "x": 1686272,
+            "y": 3429000,
+            "w": 6868800,
+            "h": 436195
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Campus\nReopening \nGuide"
+            }
+          ],
+          "key": "ppt/slides/slide1.xml#textbox:5",
+          "id": 5,
+          "name": "Title 4",
+          "bbox": {
+            "x": 859859,
+            "y": 87745,
+            "w": 9822433,
+            "h": 3138423
+          },
+          "z": 2
+        },
+        {
+          "type": "picture",
+          "imgPath": "ppt/media/image12.png",
+          "bytes": 16927,
+          "key": "ppt/slides/slide1.xml#picture:10",
+          "id": 10,
+          "name": "Picture 9",
+          "bbox": {
+            "x": 8468940,
+            "y": 5398041,
+            "w": 1983102,
+            "h": 1228878
+          },
+          "z": 3
+        },
+        {
+          "type": "picture",
+          "imgPath": "ppt/media/image13.png",
+          "bytes": 5502,
+          "key": "ppt/slides/slide1.xml#picture:11",
+          "id": 11,
+          "name": "Picture 10",
+          "bbox": {
+            "x": 1150738,
+            "y": 5614569,
+            "w": 3055534,
+            "h": 1093037
+          },
+          "z": 4
+        },
+        {
+          "type": "picture",
+          "imgPath": "ppt/media/image14.png",
+          "bytes": 4774,
+          "key": "ppt/slides/slide1.xml#picture:12",
+          "id": 12,
+          "name": "Picture 11",
+          "bbox": {
+            "x": 5495447,
+            "y": 5874266,
+            "w": 1684317,
+            "h": 573644
+          },
+          "z": 5
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Principles and Guidance"
+            }
+          ],
+          "key": "ppt/slides/slide2.xml#textbox:5",
+          "id": 5,
+          "name": "Title 4",
+          "bbox": {
+            "x": 628650,
+            "y": 386790,
+            "w": 3127881,
+            "h": 1495794
+          },
+          "z": 0
+        },
+        {
+          "type": "picture",
+          "imgPath": "ppt/media/image15.png",
+          "bytes": 64891,
+          "key": "ppt/slides/slide2.xml#picture:6",
+          "id": 6,
+          "name": "Picture 5",
+          "bbox": {
+            "x": 5397731,
+            "y": 0,
+            "w": 5550131,
+            "h": 6900400
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Washington is home to some of the best colleges and universities in the nation. In these challenging times, we have found partnership and great strength in collaboration across levels and sectors of higher education. The Higher Education Leaders Re-Opening Work Group represents that partnership, and together we speak for 50 higher education institutions across the state of Washington, educating more than 550,000 students."
+            }
+          ],
+          "key": "ppt/slides/slide2.xml#textbox:8",
+          "id": 8,
+          "name": "TextBox 7",
+          "bbox": {
+            "x": 628650,
+            "y": 2081213,
+            "w": 3127881,
+            "h": 4389997
+          },
+          "z": 2
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Principles and Guidance"
+            }
+          ],
+          "key": "ppt/slides/slide3.xml#textbox:5",
+          "id": 5,
+          "name": "Title 4",
+          "bbox": {
+            "x": 628650,
+            "y": 386790,
+            "w": 3127881,
+            "h": 1495794
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Washington is home to some of the best colleges and universities in the nation. In these challenging times, we have found partnership and great strength in collaboration across levels and sectors of higher education. The Higher Education Leaders Re-Opening Work Group represents that partnership, and together we speak for 50 higher education institutions across the state of Washington, educating more than 550,000 students."
+            }
+          ],
+          "key": "ppt/slides/slide3.xml#textbox:8",
+          "id": 8,
+          "name": "TextBox 7",
+          "bbox": {
+            "x": 628650,
+            "y": 2081213,
+            "w": 3127881,
+            "h": 4389997
+          },
+          "z": 1
+        },
+        {
+          "type": "picture",
+          "imgPath": "ppt/media/image16.png",
+          "bytes": 49900,
+          "key": "ppt/slides/slide3.xml#picture:7",
+          "id": 7,
+          "name": "Picture 6",
+          "bbox": {
+            "x": 5489171,
+            "y": 0,
+            "w": 5284124,
+            "h": 6879491
+          },
+          "z": 2
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Context setting \nAligned statement \u0026 checklists"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:4",
+          "id": 4,
+          "name": "Title 3",
+          "bbox": {
+            "x": 630000,
+            "y": 2484660,
+            "w": 3865800,
+            "h": 1495794
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Washington Council of Presidents"
+            },
+            {
+              "level": 1,
+              "text": "Independent Colleges of Washington"
+            },
+            {
+              "level": 1,
+              "text": "Washington State Community and Technical Colleges"
+            },
+            {
+              "level": 1,
+              "text": "University of Washington reps."
+            },
+            {
+              "level": 1,
+              "text": "Washington State University reps."
+            },
+            {
+              "level": 1,
+              "text": "WA Student Achievement Council"
+            },
+            {
+              "level": 1,
+              "text": "King County Public Health reps."
+            },
+            {
+              "level": 1,
+              "text": "Spokane County Public Health reps."
+            },
+            {
+              "level": 1,
+              "text": "Whitman County Public Health reps."
+            },
+            {
+              "level": 1,
+              "text": "WA Department of Health"
+            },
+            {
+              "level": 1,
+              "text": "WA Labor \u0026 Industries"
+            },
+            {
+              "level": 1,
+              "text": "WA Roundtable"
+            },
+            {
+              "level": 1,
+              "text": "Challenge Seattle"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:31",
+          "id": 31,
+          "name": "Content Placeholder 3",
+          "bbox": {
+            "x": 5777877,
+            "y": 4835275,
+            "w": 5814855,
+            "h": 1497004
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Who | People engaged for development"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:5",
+          "id": 5,
+          "name": "Rectangle 4",
+          "bbox": {
+            "x": 5777877,
+            "y": 4293927,
+            "w": 5814855,
+            "h": 338554
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Developed based on interviews with public health and university leaders in addition to incorporating effective practices seen globally"
+            },
+            {
+              "level": 1,
+              "text": "Built off prior work including:"
+            },
+            {
+              "level": 2,
+              "text": "Higher education institution work preparing for and executing reopening under the Governor\u0027s \u0022Safe Start\u0022 measures"
+            },
+            {
+              "level": 2,
+              "text": "Higher Ed Reopening Matrix developed by the Higher Ed Leaders Re-Opening Workgroup"
+            },
+            {
+              "level": 2,
+              "text": "WA Private Sector Employer Checklists"
+            },
+            {
+              "level": 2,
+              "text": "CDC and WA Labor \u0026 Industries guidelines"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:11",
+          "id": 11,
+          "name": "Content Placeholder 3",
+          "bbox": {
+            "x": 5777877,
+            "y": 2306781,
+            "w": 5814855,
+            "h": 1661993
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "How | Process for development"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:45",
+          "id": 45,
+          "name": "Rectangle 44",
+          "bbox": {
+            "x": 5777877,
+            "y": 1952536,
+            "w": 5814855,
+            "h": 338554
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Instill confidence in key stakeholders about the development of higher education institutions\u0027 back-to-school plans in Washington"
+            },
+            {
+              "level": 1,
+              "text": "Align how higher education institutions in Washington are approaching and developing back-to-school plans"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:10",
+          "id": 10,
+          "name": "Content Placeholder 3",
+          "bbox": {
+            "x": 5777877,
+            "y": 656764,
+            "w": 5814855,
+            "h": 738664
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Why | Reason for development"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:46",
+          "id": 46,
+          "name": "Rectangle 45",
+          "bbox": {
+            "x": 5777877,
+            "y": 310741,
+            "w": 5814855,
+            "h": 338554
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "We spoke with individuals from the organizations below and incorporated their input:"
+            }
+          ],
+          "key": "ppt/slides/slide4.xml#textbox:9",
+          "id": 9,
+          "name": "Rectangle 8",
+          "bbox": {
+            "x": 5687688,
+            "y": 4583597,
+            "w": 6293904,
+            "h": 276999
+          },
+          "z": 7
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Aligned statement from higher education institutions in Washington State (I/II)"
+            }
+          ],
+          "key": "ppt/slides/slide5.xml#textbox:2",
+          "id": 2,
+          "name": "Title 1",
+          "bbox": {
+            "x": 630000,
+            "y": 622800,
+            "w": 10933350,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The objective of this document is to serve as a set of guiding principles higher education institutions can align on to instill confidence in students, parents, staff, faculty, communities, and public sector leaders in back-to-school planning. These higher education institutions aim to fulfill their mission to prepare students of all ages and backgrounds for better livelihoods, emphasizing the benefits that completing college education brings for individuals and society, particularly in fields critical to our State\u0027s recovery. It is critical to ensure equitable outcomes and mitigate any disproportionate impacts on a given population. This document was developed in partnership with 501 higher education institutions in Washington State representing ~550k1 students."
+            },
+            {
+              "level": 0,
+              "text": "Higher education institutions in Washington are also a key economic driver of communities across the state. The reopening of higher education institutions will play a crucial part in the economic recovery of Washington State as a whole both in terms of economic impact on Washington State and providing Washington employers with the highly trained talent they need to recover and thrive."
+            },
+            {
+              "level": 0,
+              "text": "In a COVID-19 environment, we as the higher education institutions in Washington State will seek to:"
+            },
+            {
+              "level": 1,
+              "text": "Promote safe and healthy environments both for the people in our surrounding communities and on-campus for our students, staff, and faculty"
+            },
+            {
+              "level": 1,
+              "text": "Partner with public health officials to ensure we are guided by what keeps our communities safe, building on prior work in partnership with our local health departments to help us effectively plan and implement health and safety protocols"
+            },
+            {
+              "level": 1,
+              "text": "Use data- and science-driven decision-making to make informed choices and prepare in the face of uncertainty"
+            },
+            {
+              "level": 1,
+              "text": "Develop detailed implementation plans that meet the needs of each school\u0027s relevant community environments and that can flexibly adapt to changing circumstances"
+            }
+          ],
+          "key": "ppt/slides/slide5.xml#textbox:5",
+          "id": 5,
+          "name": "Rectangle 4",
+          "bbox": {
+            "x": 545508,
+            "y": 1351314,
+            "w": 11017842,
+            "h": 4219737
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "From Jan Yoshiwara: SBCTC has 34 colleges with 100 locations, 360K students with 21K employees; From Terri Standish-Kuon: ICW has 10 campuses, 35K\u002B students, 8K\u002B employees; From Paul Francis: COP has 6 Institutions with \u003E156K students"
+            }
+          ],
+          "key": "ppt/slides/slide5.xml#textbox:9",
+          "id": 9,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 629398,
+            "y": 6207549,
+            "w": 10247149,
+            "h": 276999
+          },
+          "z": 2
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Aligned statement from higher education institutions in Washington State (II/II)"
+            }
+          ],
+          "key": "ppt/slides/slide6.xml#textbox:2",
+          "id": 2,
+          "name": "Title 1",
+          "bbox": {
+            "x": 630000,
+            "y": 622800,
+            "w": 10933350,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Across the higher education institutions in Washington State, we will work together to share our thinking on our decision-making process and contingency planning as we prepare for different possible scenarios going forward, taking into account:"
+            },
+            {
+              "level": 1,
+              "text": "Government requirements to ensure we are following health and safety protocols"
+            },
+            {
+              "level": 1,
+              "text": "Healthcare capacity measures in terms of testing, PPE, case and contact investigations"
+            },
+            {
+              "level": 1,
+              "text": "Ways to protect the at-risk and vulnerable among our students, staff, faculty, and community"
+            },
+            {
+              "level": 1,
+              "text": "Operational and financial feasibility to ensure we are able to flexibly action on plans should conditions shift"
+            },
+            {
+              "level": 1,
+              "text": "Effective use of resources for students and the state while delivering on the mission of higher education"
+            },
+            {
+              "level": 1,
+              "text": "Support for social and emotional needs across all student populations"
+            },
+            {
+              "level": 1,
+              "text": "Equitable impact on student outcomes"
+            },
+            {
+              "level": 0,
+              "text": "We will also continue to work together to flesh out any outstanding items that require further collaboration and partnership."
+            }
+          ],
+          "key": "ppt/slides/slide6.xml#textbox:5",
+          "id": 5,
+          "name": "Rectangle 4",
+          "bbox": {
+            "x": 628428,
+            "y": 1921792,
+            "w": 10933201,
+            "h": 4199138
+          },
+          "z": 1
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Three forms of checklists to serve as guidance for higher education institutions in Washington state"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:2",
+          "id": 2,
+          "name": "Title 1",
+          "bbox": {
+            "x": 630000,
+            "y": 622800,
+            "w": 10933200,
+            "h": 886397
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Higher education administrators have a strong incentive to meet (and exceed where/when appropriate) baseline recommendations as adverse public health outcomes could result in more stringent restrictions"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:19",
+          "id": 19,
+          "name": "TextBox 18",
+          "bbox": {
+            "x": 628265,
+            "y": 5527952,
+            "w": 10933799,
+            "h": 934098
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Broad checklist of how an institution can create a \u0022New Normal\u0022 to fight COVID-19 that can be applied to a variety of higher education facilities and services"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:27",
+          "id": 27,
+          "name": "ee4pContent1",
+          "bbox": {
+            "x": 629400,
+            "y": 3844989,
+            "w": 3123862,
+            "h": 1536774
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Optional considerations and examples that institutions can implement where feasible and relevant"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:28",
+          "id": 28,
+          "name": "ee4pContent2",
+          "bbox": {
+            "x": 4533030,
+            "y": 3844989,
+            "w": 3125941,
+            "h": 1481808
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Checklist of specific practices to mitigate risk, tailored to particular campus facilities/services: food services, transportation, residences"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:29",
+          "id": 29,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 8437258,
+            "y": 3844989,
+            "w": 3125941,
+            "h": 1731508
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 3,
+              "text": "Baseline recommendations"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:30",
+          "id": 30,
+          "name": "ee4pHeader1",
+          "bbox": {
+            "x": 629400,
+            "y": 2966588,
+            "w": 3123862,
+            "h": 759600
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 3,
+              "text": "Additional considerations"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:31",
+          "id": 31,
+          "name": "ee4pHeader2",
+          "bbox": {
+            "x": 4532290,
+            "y": 2966588,
+            "w": 3125941,
+            "h": 759600
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 3,
+              "text": "Setting-specific protocols"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:32",
+          "id": 32,
+          "name": "ee4pHeader3",
+          "bbox": {
+            "x": 8437258,
+            "y": 3012224,
+            "w": 3125941,
+            "h": 713964
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Applies across the institution"
+            },
+            {
+              "level": 0,
+              "text": "Leveraged and built upon WA State reopening plan"
+            },
+            {
+              "level": 0,
+              "text": "\u0026 WA employer reopening checklists"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:56",
+          "id": 56,
+          "name": "TextBox 55",
+          "bbox": {
+            "x": 2265579,
+            "y": 1149861,
+            "w": 3754395,
+            "h": 489904
+          },
+          "z": 8
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Applies to specific campus settings"
+            },
+            {
+              "level": 0,
+              "text": "Leveraged and built upon CDC \u0026 other state guidance"
+            }
+          ],
+          "key": "ppt/slides/slide7.xml#textbox:60",
+          "id": 60,
+          "name": "TextBox 59",
+          "bbox": {
+            "x": 8592929,
+            "y": 1135371,
+            "w": 3100900,
+            "h": 518883
+          },
+          "z": 9
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "For reference: Checklists developed using multiple sources"
+            }
+          ],
+          "key": "ppt/slides/slide8.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 629999,
+            "y": 2764203,
+            "w": 3084751,
+            "h": 1314311
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Baseline/Additional considerations"
+            },
+            {
+              "level": 1,
+              "text": "Adjusted Washington Roundtable / Challenge Seattle \u0022two tiered checklists for employer Safe Work Plans\u0022 for higher education context"
+            }
+          ],
+          "key": "ppt/slides/slide8.xml#textbox:5",
+          "id": 5,
+          "name": "Text Placeholder 3",
+          "bbox": {
+            "x": 5820890,
+            "y": 1030325,
+            "w": 5580535,
+            "h": 1077218
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Food services protocol"
+            },
+            {
+              "level": 1,
+              "text": "Synthesized National Restaurant Association restaurant recommendations and Cushman and Wakefield food hall guidance"
+            }
+          ],
+          "key": "ppt/slides/slide8.xml#textbox:29",
+          "id": 29,
+          "name": "Rectangle 28",
+          "bbox": {
+            "x": 5892800,
+            "y": 2115994,
+            "w": 6096000,
+            "h": 1077218
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Residences protocol"
+            },
+            {
+              "level": 1,
+              "text": "Synthesized CDC recommendations for Shared or Congregate Housing and Correctional/Detention Facilities"
+            }
+          ],
+          "key": "ppt/slides/slide8.xml#textbox:30",
+          "id": 30,
+          "name": "Rectangle 29",
+          "bbox": {
+            "x": 5892800,
+            "y": 3388401,
+            "w": 6096000,
+            "h": 1018284
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Campus transportation protocol"
+            },
+            {
+              "level": 1,
+              "text": "Synthesized CDC and US Department of Transportation recommendations"
+            }
+          ],
+          "key": "ppt/slides/slide8.xml#textbox:31",
+          "id": 31,
+          "name": "Rectangle 30",
+          "bbox": {
+            "x": 5892800,
+            "y": 4447309,
+            "w": 6096000,
+            "h": 830997
+          },
+          "z": 4
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Baseline recommendations for higher education institutions reopening plans\nInstitutions are developing Safe Back-to-School plans to resume operations with consideration of these critical elements"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 868232,
+            "y": 326825,
+            "w": 10969247,
+            "h": 526298
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Adhere to federal, state and local public health and safety guidelines;  develop comprehensive plans for each phase of reopening in accordance with WA State guidelines and local health guidelines; make available a copy of these plans at each location on campus"
+            },
+            {
+              "level": 0,
+              "text": "Work from home for operations able to be performed remotely and institutions will follow WA State returning to work guidance for its personnel"
+            },
+            {
+              "level": 0,
+              "text": "Maintain minimum physical distancing whenever possible of 6 feet between all on-campus personnel, including with visitors; where physical distancing cannot be maintained, implement administrative or engineering controls to minimize exposure"
+            },
+            {
+              "level": 0,
+              "text": "Follow WA State phased reopening guidelines for gathering sizes"
+            },
+            {
+              "level": 0,
+              "text": "Ensure frequent and adequate hand washing policies and include adequate maintenance of supplies; use disposable gloves where safe/applicable to prevent transmission on shared items"
+            },
+            {
+              "level": 0,
+              "text": "Routine sanitization of high-touch surfaces and shared resources (e.g., doorknobs, elevators, vending machines, points of sales)"
+            },
+            {
+              "level": 0,
+              "text": "Ask students/personnel to self-certify that they have experienced no CV-19 symptoms since last visit to campus facility"
+            },
+            {
+              "level": 0,
+              "text": "Ask students/personnel to stay home and seek medical guidance if they are experiencing any known symptoms; remain isolated until diagnosis and next steps are clear"
+            },
+            {
+              "level": 0,
+              "text": "Ask students/personnel to self-quarantine per local public health guidelines if confirmed to have COVID-19 or exposed to confirmed case"
+            },
+            {
+              "level": 1,
+              "text": "Please see supporting guidance from the WA State Department of Health: Click for link"
+            },
+            {
+              "level": 0,
+              "text": "Develop response protocols for students, personnel, and visitors reporting symptoms and/or are confirmed to have COVID-19"
+            },
+            {
+              "level": 0,
+              "text": "Avoid non-essential travel by school personnel and propose self-quarantine per local public health and worker safety guidelines after any high-risk travel as defined by the CDC (e.g., international travel); follow WA State reopening guidelines for travel"
+            },
+            {
+              "level": 0,
+              "text": "If feasible, log students, personnel (and visitors where possible);  follow WA State guidelines for logging onsite personnel"
+            },
+            {
+              "level": 0,
+              "text": "Available contact for all students/personnel to report concerns and/or potential violations of the Safe Back-to-School Plan"
+            },
+            {
+              "level": 0,
+              "text": "Regular self-monitoring and updates of the Safe Back-to-School Plan"
+            },
+            {
+              "level": 0,
+              "text": "Communication of Safe Back-to-School Plan to all students and personnel including any future modifications"
+            },
+            {
+              "level": 0,
+              "text": "Designate specific spaces for isolating campus personnel and/or students on-campus as needed (e.g. specific building campus personnel and/or students can quarantine in)"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:8",
+          "id": 8,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3314195,
+            "y": 1257263,
+            "w": 8716440,
+            "h": 3293209
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Campus Safety"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:14",
+          "id": 14,
+          "name": "Title 2",
+          "bbox": {
+            "x": 3314195,
+            "y": 1061762,
+            "w": 3013776,
+            "h": 166199
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Adhere to state and federal law for health and safety during COVID-19 including WA State\u0027s \u0022Safe Start\u0022 guidelines and WA Labor \u0026 Industries guidelines"
+            },
+            {
+              "level": 0,
+              "text": "Provide students/personnel with PPE such as gloves, goggles, face shields, and masks as appropriate or required for students/personnel not working alone (e.g. any public-facing job and/or those whose responsibility includes operating within physical distancing limits of 6 feet; if PPE cannot be provided as appropriate shut down activity"
+            },
+            {
+              "level": 1,
+              "text": "Note: Follow WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 0,
+              "text": "Identify available alternative arrangements for students/personnel upon requests or refusals to work due to concerns related to campus safety. Priority should be given for students/personnel who are considered high-risk/vulnerable as defined by public health officials; Follow WA State guidelines for COVID-19 scenarios \u0026 benefits"
+            },
+            {
+              "level": 0,
+              "text": "Educate students/personnel on symptom detection, sources of high risk to COVID-19, prevention measures, and leave benefits/policies (e.g., UI for personnel that need to self-quarantine); follow any education requirements for employers per WA COVID-19 safety plan"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:28",
+          "id": 28,
+          "name": "ee4pContent1",
+          "bbox": {
+            "x": 3319640,
+            "y": 4792882,
+            "w": 8710987,
+            "h": 1184940
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Student/Personnel Support"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:29",
+          "id": 29,
+          "name": "Title 2",
+          "bbox": {
+            "x": 3319641,
+            "y": 4622177,
+            "w": 2698919,
+            "h": 166199
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Limit or prohibit visitors"
+            },
+            {
+              "level": 0,
+              "text": "Visible entry point signage for students, personnel, and visitors on shared on-campus responsibilities (including proper hygiene \u0026 sanitization, physical distancing/PPE guidance and information for reporting concerns, staying home if feeling sick)"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:15",
+          "id": 15,
+          "name": "ee4pContent1",
+          "bbox": {
+            "x": 3319641,
+            "y": 6230800,
+            "w": 8086668,
+            "h": 441146
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Visitor Expectations"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:16",
+          "id": 16,
+          "name": "Title 2",
+          "bbox": {
+            "x": 3319641,
+            "y": 6054033,
+            "w": 2698919,
+            "h": 166199
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u0022New Normal\u0022 foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:20",
+          "id": 20,
+          "name": "Rectangle 19",
+          "bbox": {
+            "x": 461555,
+            "y": 1432396,
+            "w": 2205446,
+            "h": 1014174
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides proposals for institutions of higher education in Washington State to reopen operations."
+            },
+            {
+              "level": 0,
+              "text": "These actions will run in parallel to public health efforts."
+            },
+            {
+              "level": 0,
+              "text": "Protecting Washingtonians through a safe reopening and acting as good stewards of our local communities is our priority."
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance."
+            }
+          ],
+          "key": "ppt/slides/slide9.xml#textbox:22",
+          "id": 22,
+          "name": "Title 2",
+          "bbox": {
+            "x": 510782,
+            "y": 2541520,
+            "w": 2140073,
+            "h": 3877985
+          },
+          "z": 8
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Additional considerations: Campus safety\nElements for institutions to consider \u0026 implement where feasible/relevant"
+            }
+          ],
+          "key": "ppt/slides/slide10.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 868233,
+            "y": 492291,
+            "w": 10714163,
+            "h": 526298
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Encouraging proper hygiene \u0026 health practices"
+            },
+            {
+              "level": 1,
+              "text": "Encourage students/personnel to do regular temperature checks at home before coming to work"
+            },
+            {
+              "level": 1,
+              "text": "Avoid non-essential person-to-person contact (e.g., handshakes)"
+            },
+            {
+              "level": 0,
+              "text": "Health screenings and testing"
+            },
+            {
+              "level": 1,
+              "text": "Routine temperature checks \u0026 screens on-premise"
+            },
+            {
+              "level": 1,
+              "text": "Work with Institutions within the same county to coordinate testing efforts"
+            },
+            {
+              "level": 0,
+              "text": "Enabling tracking and tracing"
+            },
+            {
+              "level": 1,
+              "text": "Notify and isolate all students/personnel in contact with an individual that develops symptoms while maintaining confidentiality of those who are sick"
+            },
+            {
+              "level": 1,
+              "text": "Disinfect areas where students/personnel who was sick touched"
+            },
+            {
+              "level": 1,
+              "text": "Have the ability to log visitors that come on-campus"
+            },
+            {
+              "level": 0,
+              "text": "Sanitation procedures"
+            },
+            {
+              "level": 1,
+              "text": "Provide hand sanitizer at entrances/exits"
+            },
+            {
+              "level": 1,
+              "text": "Encourage personnel to wash hands regularly (after bathroom breaks, after eating, etc.)"
+            },
+            {
+              "level": 1,
+              "text": "Provide disinfectant wipes"
+            },
+            {
+              "level": 1,
+              "text": "Ensure frequent cleaning of high touch or shared equipment"
+            },
+            {
+              "level": 1,
+              "text": "Sanitize/quarantine deliveries/packages"
+            },
+            {
+              "level": 1,
+              "text": "Perform regular deep cleaning"
+            },
+            {
+              "level": 1,
+              "text": "Provide soap and running water, when running water not available provide portable washing stations"
+            },
+            {
+              "level": 0,
+              "text": "Limiting shared resources"
+            },
+            {
+              "level": 1,
+              "text": "Limit shared desks/workspaces"
+            },
+            {
+              "level": 1,
+              "text": "Reduce use of shared office supplies/resources"
+            },
+            {
+              "level": 1,
+              "text": "Limit shared food"
+            },
+            {
+              "level": 1,
+              "text": "Limit cafeteria capacity and services"
+            },
+            {
+              "level": 1,
+              "text": "Limit public kitchens/vending"
+            }
+          ],
+          "key": "ppt/slides/slide10.xml#textbox:15",
+          "id": 15,
+          "name": "ee4pContent2",
+          "bbox": {
+            "x": 3641732,
+            "y": 1187870,
+            "w": 4016368,
+            "h": 5693866
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Methods to enact distancing procedures"
+            },
+            {
+              "level": 1,
+              "text": "Implement reduced maximum capacity limits"
+            },
+            {
+              "level": 1,
+              "text": "Stagger arrivals into campus spaces to avoid congestion"
+            },
+            {
+              "level": 1,
+              "text": "Limit ingress/egress points in campus buildings/facilities while maintaining fire exits"
+            },
+            {
+              "level": 1,
+              "text": "Stagger entry into buildings/facilities"
+            },
+            {
+              "level": 1,
+              "text": "One-way facility aisles"
+            },
+            {
+              "level": 1,
+              "text": "Use distance markings at places of congregation"
+            },
+            {
+              "level": 1,
+              "text": "Enact plexiglass protection between workstations"
+            },
+            {
+              "level": 1,
+              "text": "Virtual meetings even when on campus"
+            },
+            {
+              "level": 1,
+              "text": "Re-organize floor layouts to permit physical distancing"
+            },
+            {
+              "level": 1,
+              "text": "Stagger usage of common areas"
+            },
+            {
+              "level": 1,
+              "text": "Avoid sitting face-to-face"
+            },
+            {
+              "level": 1,
+              "text": "Create isolated work cells/teams for on-campus personnel where possible"
+            },
+            {
+              "level": 1,
+              "text": "Identify choke point and high risk areas where personnel typically congregate where distancing will need more control/monitoring"
+            },
+            {
+              "level": 1,
+              "text": "To the extent practical, allow only one group/class at a time at the same location/lab/classroom."
+            },
+            {
+              "level": 0,
+              "text": "Ensuring governance \u0026 accountable roles over plan"
+            },
+            {
+              "level": 1,
+              "text": "Appoint team/lead to manage ongoing Safe Back-to-School Plan and monitor ongoing health of personnel at on-campus locations"
+            },
+            {
+              "level": 1,
+              "text": "Designate a hygiene leader for facility who is responsible for protocol audits"
+            },
+            {
+              "level": 1,
+              "text": "Regular reporting of student and personnel sentiment and tracking of public health trends"
+            },
+            {
+              "level": 0,
+              "text": "On-going training to meet health guidelines"
+            },
+            {
+              "level": 1,
+              "text": "Host pre-return training and track attendance/completion"
+            },
+            {
+              "level": 1,
+              "text": "Educate students/personnel in the language they understand best about coronavirus and how to prevent transmission and the institution\u0027s COVID-19 policies."
+            }
+          ],
+          "key": "ppt/slides/slide10.xml#textbox:16",
+          "id": 16,
+          "name": "ee4pContent2",
+          "bbox": {
+            "x": 7778184,
+            "y": 1187870,
+            "w": 3804216,
+            "h": 5855449
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Each individual institution will develop and implement a Safe Back-to-School Plan."
+            },
+            {
+              "level": 0,
+              "text": "The following lists are considerations and examples to aid in the development of individual plans."
+            },
+            {
+              "level": 0,
+              "text": "Note: Institutions are not recommended to implement all listed examples. These are provided as known practices being utilized to-date and are subject to change."
+            }
+          ],
+          "key": "ppt/slides/slide10.xml#textbox:11",
+          "id": 11,
+          "name": "Title 2",
+          "bbox": {
+            "x": 786849,
+            "y": 2705607,
+            "w": 2361983,
+            "h": 3102388
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Helping develop"
+            },
+            {
+              "level": 0,
+              "text": "individualized, flexible"
+            },
+            {
+              "level": 0,
+              "text": "Safe Back-to-School Plans"
+            }
+          ],
+          "key": "ppt/slides/slide10.xml#textbox:14",
+          "id": 14,
+          "name": "Rectangle 13",
+          "bbox": {
+            "x": 786849,
+            "y": 1510880,
+            "w": 2476319,
+            "h": 1014605
+          },
+          "z": 4
+        }
+      ]
+    },
+    {
+      "index": 10,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Additional considerations: Campus support\nElements for Institutions to consider \u0026 implement where feasible/relevant"
+            }
+          ],
+          "key": "ppt/slides/slide11.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 868233,
+            "y": 492291,
+            "w": 10567539,
+            "h": 526298
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Ongoing communication to workforce"
+            },
+            {
+              "level": 1,
+              "text": "Provide content for vulnerable students/personnel to help navigate back-to-school (e.g. aggregate helpful materials, explain evolving gov\u0027t benefits)"
+            },
+            {
+              "level": 0,
+              "text": "Enacting modified working models for personnel"
+            },
+            {
+              "level": 1,
+              "text": "Job shares that allow for reduced hours"
+            },
+            {
+              "level": 1,
+              "text": "Offer partial workforce or alternate day of week operating model"
+            },
+            {
+              "level": 1,
+              "text": "Different in-office working hours (e.g. two shifts: 6:30a-12:30p and 1p-7p with time between shifts)"
+            },
+            {
+              "level": 0,
+              "text": "Expanded / extended work from home \u0026 leave policies"
+            },
+            {
+              "level": 1,
+              "text": "Provide one-time home office supply voucher"
+            },
+            {
+              "level": 1,
+              "text": "Tiered PTO (e.g. FTEs get additional 80 hours; PTE get additional 40 hours; all paid out at year end if not used)"
+            },
+            {
+              "level": 1,
+              "text": "Create workforce relief/aid fund and adopt policy on how funds will be distributed"
+            },
+            {
+              "level": 1,
+              "text": "Create policies to encourage students/personnel to stay home when feeling sick or came into contact with positive case"
+            },
+            {
+              "level": 0,
+              "text": "Decreasing commute risks \u0026 pressure on public transport"
+            },
+            {
+              "level": 1,
+              "text": "Promote and enable individual commutes (e.g., subsidized biking/parking)"
+            },
+            {
+              "level": 1,
+              "text": "Institution-sponsored buses/transit options"
+            },
+            {
+              "level": 1,
+              "text": "Alternative hours to limit transportation during high public traffic hours"
+            },
+            {
+              "level": 0,
+              "text": "Providing additional training and resources"
+            },
+            {
+              "level": 1,
+              "text": "Provide guidance on virtual and in-person teams"
+            },
+            {
+              "level": 1,
+              "text": "Provide career planning and resources"
+            },
+            {
+              "level": 1,
+              "text": "Train staff to support new back-to-school model"
+            },
+            {
+              "level": 1,
+              "text": "Post, in areas visible, required hygienic practices"
+            }
+          ],
+          "key": "ppt/slides/slide11.xml#textbox:10",
+          "id": 10,
+          "name": "ee4pContent2",
+          "bbox": {
+            "x": 3790031,
+            "y": 1188720,
+            "w": 3852336,
+            "h": 5386090
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Enabling access to education and childcare"
+            },
+            {
+              "level": 1,
+              "text": "On-site day care or study rooms for limited number of children per day"
+            },
+            {
+              "level": 1,
+              "text": "Voucher for online education tools"
+            },
+            {
+              "level": 1,
+              "text": "Access to apps to match caregivers with need (including recently displaced workers)"
+            },
+            {
+              "level": 1,
+              "text": "Priority for childcare for workers and students not able to WFH"
+            },
+            {
+              "level": 0,
+              "text": "Building morale and virtual culture"
+            },
+            {
+              "level": 1,
+              "text": "Create virtual HR office hours and/or HR hotline"
+            },
+            {
+              "level": 1,
+              "text": "Virtual companywide meetings"
+            },
+            {
+              "level": 1,
+              "text": "Create networks for workers to connect/share remote working best practices"
+            },
+            {
+              "level": 1,
+              "text": "Sponsor well-being challenges geared to staying physically and mentally healthy"
+            },
+            {
+              "level": 0,
+              "text": "Supporting mental health needs"
+            },
+            {
+              "level": 1,
+              "text": "Access to reduced cost and/or free counseling"
+            },
+            {
+              "level": 1,
+              "text": "Access to reduced cost and/or telemedicine consultations"
+            },
+            {
+              "level": 1,
+              "text": "Benefit extensions for household members"
+            },
+            {
+              "level": 1,
+              "text": "Access to meditation/mindfulness content"
+            },
+            {
+              "level": 1,
+              "text": "Digital support groups to decrease isolation and share ideas"
+            },
+            {
+              "level": 1,
+              "text": "Virtual play dates for families with children of similar ages"
+            },
+            {
+              "level": 1,
+              "text": "Expand virtual health and counseling and continue to provide virtual options after reopening"
+            },
+            {
+              "level": 0,
+              "text": "Ensuring equitable outcomes"
+            },
+            {
+              "level": 1,
+              "text": "Consider and mitigate any disproportionate impacts on a given population (e.g., due to instructional decisions)"
+            }
+          ],
+          "key": "ppt/slides/slide11.xml#textbox:11",
+          "id": 11,
+          "name": "ee4pContent2",
+          "bbox": {
+            "x": 7824566,
+            "y": 1188720,
+            "w": 3749040,
+            "h": 4616648
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Each individual institution will develop and implement a Safe Back-to-School Plan."
+            },
+            {
+              "level": 0,
+              "text": "The following lists are considerations and examples to aid in the development of individual plans."
+            },
+            {
+              "level": 0,
+              "text": "Note: Institutions are not recommended to implement all listed examples. These are provided as known practices being utilized to-date and are subject to change."
+            }
+          ],
+          "key": "ppt/slides/slide11.xml#textbox:14",
+          "id": 14,
+          "name": "Title 2",
+          "bbox": {
+            "x": 786849,
+            "y": 2705607,
+            "w": 2361983,
+            "h": 3102388
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Helping develop"
+            },
+            {
+              "level": 0,
+              "text": "individualized, flexible"
+            },
+            {
+              "level": 0,
+              "text": "Safe Back-to-School Plans"
+            }
+          ],
+          "key": "ppt/slides/slide11.xml#textbox:22",
+          "id": 22,
+          "name": "Rectangle 21",
+          "bbox": {
+            "x": 786849,
+            "y": 1510880,
+            "w": 2476319,
+            "h": 1014605
+          },
+          "z": 4
+        }
+      ]
+    },
+    {
+      "index": 11,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Recommended protocols for food services to resume operations (1/2)"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630000,
+            "y": 622800,
+            "w": 10933350,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Complete thorough and detailed cleaning of entire facility, with focus on high-contact areas that would be touched by both students/personnel"
+            },
+            {
+              "level": 1,
+              "text": "If relevant, consider single-use menus only; follow WA State phased reopening guidance for menus"
+            },
+            {
+              "level": 1,
+              "text": "Make hand sanitizer readily available to workers and visitors at counters, tables and stations and consider touchless solutions"
+            },
+            {
+              "level": 1,
+              "text": "Complete routine sanitization of high-touch surfaces and shared resources (e.g., door handles, points of sales)"
+            },
+            {
+              "level": 1,
+              "text": "Use EPA-registered disinfectant products and avoid all food contact surfaces when using disinfectants"
+            },
+            {
+              "level": 1,
+              "text": "Consider reducing facility hours for extra deep cleaning"
+            },
+            {
+              "level": 1,
+              "text": "Cleaning staff wear disposable gloves and gowns for all tasks in the cleaning process, including handling trash"
+            },
+            {
+              "level": 1,
+              "text": "When dining reopens, sanitize tabletops, booths, etc. between seatings"
+            },
+            {
+              "level": 1,
+              "text": "Clean and sanitize restrooms regularly based on frequency of use once dining reopens"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:30",
+          "id": 30,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222496,
+            "y": 1753172,
+            "w": 8375369,
+            "h": 1623521
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u201Cnew normal\u201D foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:20",
+          "id": 20,
+          "name": "Rectangle 19",
+          "bbox": {
+            "x": 630000,
+            "y": 1372596,
+            "w": 2296074,
+            "h": 1014174
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides recommendations for campus food services to reopen operations"
+            },
+            {
+              "level": 0,
+              "text": "These actions will run\nin parallel to public\nhealth efforts"
+            },
+            {
+              "level": 0,
+              "text": "Our priority is protecting campus communities in Washington by acting as good stewards"
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance"
+            },
+            {
+              "level": 0,
+              "text": "Note: Must consider that food services on a campus will have regular visits and thus may be higher risk than a restaurant"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:22",
+          "id": 22,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630001,
+            "y": 2387714,
+            "w": 2296069,
+            "h": 3924151
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Maintain physical distancing of 6 feet for extended periods of \u003E15 minutes (e.g., students waiting in-line to enter facility, customers waiting for takeaway); PPE to be provided for all workers"
+            },
+            {
+              "level": 1,
+              "text": "Require dining staff to wear face coverings; follow WA State reopening guidelines and WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 1,
+              "text": "Implement floor markings to promote physical distancing"
+            },
+            {
+              "level": 1,
+              "text": "Post signs to remind students/personnel of physical distancing, PPE requirements and to use hand sanitizer"
+            },
+            {
+              "level": 1,
+              "text": "Enforce capacity limits (e.g., enforced at point of entry with clickers); follow WA State reopening guidelines for restaurants"
+            },
+            {
+              "level": 1,
+              "text": "Consider an exit from the facility separate from the entrance"
+            },
+            {
+              "level": 1,
+              "text": "Manage employee schedules to allow for physical distancing whenever possible"
+            },
+            {
+              "level": 1,
+              "text": "Where possible, workstations to be staggered so employees can avoid standing direct next to one another"
+            },
+            {
+              "level": 1,
+              "text": "Limit the number of employees allowed simultaneously in any break rooms"
+            },
+            {
+              "level": 1,
+              "text": "Update floor plans for common dining areas, redesigning seating arrangements to ensure to ensure physical distancing may be maintained  between tables while visitors are eating once dining reopens"
+            },
+            {
+              "level": 1,
+              "text": "Limit amount of time each patron is allowed to remain in order to reduce exposure"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:19",
+          "id": 19,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222496,
+            "y": 4010600,
+            "w": 8515688,
+            "h": 2115964
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Cleaning and sanitizing"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:35",
+          "id": 35,
+          "name": "Rounded Rectangle 34",
+          "bbox": {
+            "x": 3222493,
+            "y": 1372596,
+            "w": 4023360,
+            "h": 397988
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Physical distancing"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:39",
+          "id": 39,
+          "name": "Rounded Rectangle 38",
+          "bbox": {
+            "x": 3222493,
+            "y": 3595520,
+            "w": 4023360,
+            "h": 397988
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "FOOD SERVICES"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:52",
+          "id": 52,
+          "name": "TextBox 51",
+          "bbox": {
+            "x": 8796184,
+            "y": 0,
+            "w": 2277986,
+            "h": 338554
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Source: National Restaurant Association COVID-19 Reopening Guidance, Cushman and Wakefield Recovery Readiness"
+            }
+          ],
+          "key": "ppt/slides/slide12.xml#textbox:54",
+          "id": 54,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 630000,
+            "y": 6348448,
+            "w": 9030914,
+            "h": 138499
+          },
+          "z": 8
+        }
+      ]
+    },
+    {
+      "index": 12,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Recommended protocols for food services to resume operations (2/2)"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630000,
+            "y": 488576,
+            "w": 10933350,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Require employees with COVID-19 symptoms to remain home until they are symptom-free for ten days and three days without medication (whichever longer)"
+            },
+            {
+              "level": 1,
+              "text": "Ask employees to self-quarantine for 14-days from symptom onset or test positivity of the case per Washington public health guidelines if confirmed to have COVID-19 or exposed"
+            },
+            {
+              "level": 1,
+              "text": "Provide employees with face coverings and keep face coverings clean and ask employees to follow 6 ft distancing guidelines; follow WA State reopening guidelines and WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 1,
+              "text": "Train all employees on the importance of frequent handwashing, the use of hand sanitizers with at least 60% alcohol content, and give them clear instruction to avoid touching hands to face"
+            },
+            {
+              "level": 1,
+              "text": "Educate workers in the language they understand best about coronavirus and how to prevent transmission, and the institution\u0027s COVID-19 policies"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:30",
+          "id": 30,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 1285969,
+            "w": 8674222,
+            "h": 1246495
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Have the ability to log all workers that come on premise for purposes of supporting public health contact tracing by the WA DOH"
+            },
+            {
+              "level": 1,
+              "text": "Check appropriate functioning of HVAC"
+            },
+            {
+              "level": 1,
+              "text": "Ask workers resuming on-premise work to confirm they have not experienced symptoms for 14 days from symptom onset or test positivity of the case prior to return"
+            },
+            {
+              "level": 1,
+              "text": "Restrict cash payments; allow payments only by card or contactless"
+            },
+            {
+              "level": 1,
+              "text": "Consider use of pre-rolled, disposable silverware if possible"
+            },
+            {
+              "level": 1,
+              "text": "Ensure adequate storage of necessary materials to meet PPE and cleaning requirements"
+            },
+            {
+              "level": 1,
+              "text": "Communicate safety protocols to all workers and dining visitors, including available contact to report violations of protocols"
+            },
+            {
+              "level": 1,
+              "text": "If offering delivery options, ensure coolers and transport containers are sanitized and encourage customers to use \u0022no touch\u0022 deliveries"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:19",
+          "id": 19,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 2844779,
+            "w": 8853924,
+            "h": 1107996
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Source: National Restaurant Association COVID-19 Reopening Guidance, Cushman and Wakefield Recovery Readiness"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:27",
+          "id": 27,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 630000,
+            "y": 6348448,
+            "w": 9030914,
+            "h": 138499
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Employee health and personal hygiene"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:35",
+          "id": 35,
+          "name": "Rounded Rectangle 34",
+          "bbox": {
+            "x": 3222494,
+            "y": 852305,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Facility safety"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:39",
+          "id": 39,
+          "name": "Rounded Rectangle 38",
+          "bbox": {
+            "x": 3222493,
+            "y": 2440431,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Customer expectations"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:32",
+          "id": 32,
+          "name": "Rounded Rectangle 31",
+          "bbox": {
+            "x": 3222493,
+            "y": 4032034,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Student/personnel support"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:56",
+          "id": 56,
+          "name": "Rounded Rectangle 55",
+          "bbox": {
+            "x": 3222494,
+            "y": 5199735,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Visible entry point signage for workers, volunteers and visitors on shared responsibilities (including proper hygiene and sanitization, physical distancing, PPE guidance and information for reporting concerns,)"
+            },
+            {
+              "level": 1,
+              "text": "Require or strongly encourage all patrons to wear cloth face coverings"
+            },
+            {
+              "level": 1,
+              "text": "Make visitor safety guidelines publicly available"
+            },
+            {
+              "level": 1,
+              "text": "Consider using social media or website to educate students/personnel on food service protocols and what to expect in dining halls"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:63",
+          "id": 63,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 4438568,
+            "w": 8339501,
+            "h": 692497
+          },
+          "z": 8
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Adhere to state and federal law for health and safety during COVID-19 including WA State\u0027s \u0022Safe Start\u0022 guidelines and WA Labor \u0026 Industries guidelines"
+            },
+            {
+              "level": 1,
+              "text": "Mitigate anxiety by recognizing fear in returning, communicating transparently, listening and surveying students/personnel regularly"
+            },
+            {
+              "level": 1,
+              "text": "Provide early reopening communication by keeping workforce informed as soon as appropriate"
+            },
+            {
+              "level": 1,
+              "text": "Reinforce training after Day One by providing ongoing methods of additional training to reinforce messaging and changes"
+            },
+            {
+              "level": 1,
+              "text": "Ensure any student/employee can follow on-campus student health specific guidelines before returning to work and while working"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:64",
+          "id": 64,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222494,
+            "y": 5606269,
+            "w": 8674223,
+            "h": 692497
+          },
+          "z": 9
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u201Cnew normal\u201D foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:74",
+          "id": 74,
+          "name": "Rectangle 73",
+          "bbox": {
+            "x": 630000,
+            "y": 1239246,
+            "w": 2296074,
+            "h": 1014174
+          },
+          "z": 10
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides recommendations for campus food services to reopen operations"
+            },
+            {
+              "level": 0,
+              "text": "These actions will run\nin parallel to public\nhealth efforts"
+            },
+            {
+              "level": 0,
+              "text": "Our priority is protecting campus communities in Washington by acting as good stewards"
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance"
+            },
+            {
+              "level": 0,
+              "text": "Note: Must consider that food services on a campus will have regular visits and thus may be higher risk than a restaurant"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:75",
+          "id": 75,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630001,
+            "y": 2254364,
+            "w": 2296069,
+            "h": 3924151
+          },
+          "z": 11
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "FOOD SERVICES"
+            }
+          ],
+          "key": "ppt/slides/slide13.xml#textbox:52",
+          "id": 52,
+          "name": "TextBox 51",
+          "bbox": {
+            "x": 8796184,
+            "y": 0,
+            "w": 2277986,
+            "h": 338554
+          },
+          "z": 12
+        }
+      ]
+    },
+    {
+      "index": 13,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Recommended protocols for campus transportation to resume operations (1/2)"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630000,
+            "y": 622800,
+            "w": 10933350,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "After each journey, complete thorough and detailed cleaning of all surfaces, with focus on high-contact areas that would be touched by both employees and passengers (e.g., handles, metal bars)"
+            },
+            {
+              "level": 1,
+              "text": "Make hand sanitizer readily available and create frequent opportunities for employees to wash their hands"
+            },
+            {
+              "level": 1,
+              "text": "Provide disposable disinfectant wipes on buses, etc. and train employees on how to regularly clean the area"
+            },
+            {
+              "level": 1,
+              "text": "Use EPA-registered disinfectant products"
+            },
+            {
+              "level": 1,
+              "text": "Consider reducing operating hours for extra deep cleaning"
+            },
+            {
+              "level": 1,
+              "text": "Cleaning staff wear disposable gloves and gowns for all tasks in the cleaning process, including handling trash"
+            },
+            {
+              "level": 1,
+              "text": "Clean and sanitize restrooms regularly based on frequency of use"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:30",
+          "id": 30,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222496,
+            "y": 1787677,
+            "w": 8515685,
+            "h": 1354217
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u201Cnew normal\u201D foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:20",
+          "id": 20,
+          "name": "Rectangle 19",
+          "bbox": {
+            "x": 630000,
+            "y": 1460391,
+            "w": 2296074,
+            "h": 1014174
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides adaptations for campus transportation, if applicable, to resume operations"
+            },
+            {
+              "level": 0,
+              "text": "These actions will run\nin parallel to public\nhealth efforts"
+            },
+            {
+              "level": 0,
+              "text": "Our priority is protecting campus communities in Washington by acting as good stewards"
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:22",
+          "id": 22,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630001,
+            "y": 2475509,
+            "w": 2296069,
+            "h": 3662541
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Institute measures to physically separate employees from passengers by a distance of 6 feet or greater (e.g., physical partitions for drivers)"
+            },
+            {
+              "level": 1,
+              "text": "Consider limiting capacity based on size of vehicle (e.g., 50%)"
+            },
+            {
+              "level": 1,
+              "text": "Ask passengers to maintain physical distancing of 6 feet and face masks worn by all employees and passengers; Follow WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 1,
+              "text": "Implement floor markings to promote physical distancing on board"
+            },
+            {
+              "level": 1,
+              "text": "Post signs for passengers to remind them of physical distancing, face covering requirements and to use hand sanitizer"
+            },
+            {
+              "level": 1,
+              "text": "Limit contact between employees and passengers as much as possible"
+            },
+            {
+              "level": 1,
+              "text": "Consider designating specific doors for entry only and others for exit only to minimize passenger contact"
+            },
+            {
+              "level": 1,
+              "text": "Manage employee schedules to allow for physical distancing whenever possible"
+            },
+            {
+              "level": 1,
+              "text": "Consider closing off every other seat on board with tape or signs to promote physical distancing"
+            },
+            {
+              "level": 1,
+              "text": "Encourage employees and passengers to avoid congregating in waiting areas and design a process to ensure all stay separate while waiting to board (e.g., outdoor distancing)"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:19",
+          "id": 19,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 3915104,
+            "w": 8339503,
+            "h": 2200602
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Source: CDC, US Department of Transportation"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:27",
+          "id": 27,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 630000,
+            "y": 6646011,
+            "w": 9030914,
+            "h": 138499
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Cleaning and sanitizing"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:35",
+          "id": 35,
+          "name": "Rounded Rectangle 34",
+          "bbox": {
+            "x": 3222493,
+            "y": 1372596,
+            "w": 4023360,
+            "h": 397988
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Physical distancing"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:39",
+          "id": 39,
+          "name": "Rounded Rectangle 38",
+          "bbox": {
+            "x": 3222493,
+            "y": 3500024,
+            "w": 4023360,
+            "h": 397988
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "TRANSPORTATION"
+            }
+          ],
+          "key": "ppt/slides/slide14.xml#textbox:56",
+          "id": 56,
+          "name": "TextBox 55",
+          "bbox": {
+            "x": 9229207,
+            "y": 0,
+            "w": 1865511,
+            "h": 338554
+          },
+          "z": 8
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Recommended protocols for campus transportation to resume operations (2/2)"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630000,
+            "y": 622800,
+            "w": 10933350,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Require employees with any COVID-19 symptoms to remain home until they are symptom-free for ten days and three days without medication (whichever longer)"
+            },
+            {
+              "level": 1,
+              "text": "Require employees to self-quarantine for 14-days from symptom onset or test positivity of the case per Washington public health guidelines if they have been exposed to COVID-19"
+            },
+            {
+              "level": 1,
+              "text": "Provide employees with face masks and keep face masks clean; Follow WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 1,
+              "text": "Train all employees on the importance of frequent handwashing, the use of hand sanitizers with at least 60% alcohol content, and give them clear instruction to avoid touching hands to face"
+            },
+            {
+              "level": 1,
+              "text": "Train all employees on symptom detection, sources of high risk to COVID-19, prevention measures and leave benefits/policies"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:30",
+          "id": 30,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 1430132,
+            "w": 8683750,
+            "h": 969496
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u201Cnew normal\u201D foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:20",
+          "id": 20,
+          "name": "Rectangle 19",
+          "bbox": {
+            "x": 630000,
+            "y": 1207937,
+            "w": 2296074,
+            "h": 1014174
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides adaptations for campus transportation, if applicable, to resume operations"
+            },
+            {
+              "level": 0,
+              "text": "These actions will run\nin parallel to public\nhealth efforts"
+            },
+            {
+              "level": 0,
+              "text": "Our priority is protecting campus communities in Washington by acting as good stewards"
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:22",
+          "id": 22,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630001,
+            "y": 2223055,
+            "w": 2296069,
+            "h": 3662541
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Have the ability to log all employees that come on board for purposes of supporting public health contact tracing by the Washington Department of Health"
+            },
+            {
+              "level": 1,
+              "text": "Check appropriate functioning of HVAC"
+            },
+            {
+              "level": 1,
+              "text": "Ask workers resuming work to confirm they have not experienced symptoms for 14 days from symptom onset or test positivity of the case prior to return"
+            },
+            {
+              "level": 1,
+              "text": "Ensure adequate storage of necessary materials to meet PPE (face masks, gloves, etc.) and cleaning requirements"
+            },
+            {
+              "level": 1,
+              "text": "Communicate safety protocols to all employees and passengers, including available contact to report violations of protocols"
+            },
+            {
+              "level": 1,
+              "text": "Consider using no-touch trash receptables if possible"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:19",
+          "id": 19,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 2889204,
+            "w": 8375365,
+            "h": 830997
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Source: CDC, US Department of Transportation"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:27",
+          "id": 27,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 630000,
+            "y": 6622748,
+            "w": 9030914,
+            "h": 138499
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Employee health and personal hygiene"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:35",
+          "id": 35,
+          "name": "Rounded Rectangle 34",
+          "bbox": {
+            "x": 3222494,
+            "y": 1011085,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Vehicle safety"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:39",
+          "id": 39,
+          "name": "Rounded Rectangle 38",
+          "bbox": {
+            "x": 3222493,
+            "y": 2473145,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Passenger expectations"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:32",
+          "id": 32,
+          "name": "Rounded Rectangle 31",
+          "bbox": {
+            "x": 3222493,
+            "y": 3786073,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 8
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Employee support"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:56",
+          "id": 56,
+          "name": "Rounded Rectangle 55",
+          "bbox": {
+            "x": 3222494,
+            "y": 5025371,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 9
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Implement signs on board for employees and passengers on shared responsibilities (including proper hygiene and sanitization, physical distancing, face coverings and information for reporting concerns)"
+            },
+            {
+              "level": 1,
+              "text": "Make passenger safety guidelines publicly available and post signs to strongly encourage passengers to wear face coverings"
+            },
+            {
+              "level": 1,
+              "text": "Consider using social media or website to educate passengers on safety protocols and what to expect when on board"
+            },
+            {
+              "level": 1,
+              "text": "Place signs at the entrance stating how passengers and employees can prepare to be on board"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:63",
+          "id": 63,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222496,
+            "y": 4202132,
+            "w": 8375365,
+            "h": 692497
+          },
+          "z": 10
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Adhere to state and federal law for health and safety during COVID-19 including WA State\u0027s \u0022Safe Start\u0022 guidelines and WA Labor \u0026 Industries guidelines"
+            },
+            {
+              "level": 1,
+              "text": "Mitigate anxiety by recognizing fear in returning, communicating transparently, listening and surveying employees regularly"
+            },
+            {
+              "level": 1,
+              "text": "Provide early reopening communication by keeping workforce informed as soon as appropriate"
+            },
+            {
+              "level": 1,
+              "text": "Reinforce training after Day One by providing ongoing methods of additional training to reinforce messaging and changes"
+            },
+            {
+              "level": 1,
+              "text": "If employees have children, provide support in navigating childcare options when returning to work"
+            },
+            {
+              "level": 1,
+              "text": "Ensure any employees can follow on-campus student specific health guidelines before returning to work and while working"
+            },
+            {
+              "level": 1,
+              "text": "If employees refuse to work due to COVID-19 related safety concerns, provide high risk individuals with benefits per WA Proclamation 20-46"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:64",
+          "id": 64,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222496,
+            "y": 5471677,
+            "w": 8545172,
+            "h": 969496
+          },
+          "z": 11
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "TRANSPORTATION"
+            }
+          ],
+          "key": "ppt/slides/slide15.xml#textbox:61",
+          "id": 61,
+          "name": "TextBox 60",
+          "bbox": {
+            "x": 9229207,
+            "y": 1841,
+            "w": 1865511,
+            "h": 338554
+          },
+          "z": 12
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Recommended protocols for campus residences to resume operations (1/2)"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 629999,
+            "y": 622800,
+            "w": 11458273,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Complete thorough and detailed cleaning of entire facilities, with focus on high-contact areas"
+            },
+            {
+              "level": 1,
+              "text": "Make hand sanitizer readily available to residents/personnel throughout property; consider touchless hand sanitizing solutions"
+            },
+            {
+              "level": 1,
+              "text": "Complete routine sanitization of high-touch surfaces (e.g., door handles, elevators, counters, etc.)"
+            },
+            {
+              "level": 1,
+              "text": "Provide residents with their own sanitation solutions or wipes to instill confidence"
+            },
+            {
+              "level": 1,
+              "text": "Disinfect all hard surfaces with an EPA registered chemical disinfectant"
+            },
+            {
+              "level": 1,
+              "text": "If a student or residential staff member tests positive, close off areas used by sick person and wait 24 hours before cleaning and disinfecting; remove staff members who test positive and quarantine"
+            },
+            {
+              "level": 1,
+              "text": "Conduct frequent cleaning of shared facilities (e.g., lounges)"
+            },
+            {
+              "level": 1,
+              "text": "For shared bathrooms, create a cleaning schedule to clean facilities regularly; provide and maintain adequate handwashing supplies and hand sanitizer"
+            },
+            {
+              "level": 1,
+              "text": "For shared showers, encourage sanitizing between users and/or increasing frequency of cleaning"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:30",
+          "id": 30,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222496,
+            "y": 1371271,
+            "w": 8588502,
+            "h": 1523494
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u201Cnew normal\u201D foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:20",
+          "id": 20,
+          "name": "Rectangle 19",
+          "bbox": {
+            "x": 630000,
+            "y": 1243944,
+            "w": 2296074,
+            "h": 1014174
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides adaptations for campus residences to resume operations"
+            },
+            {
+              "level": 0,
+              "text": "These actions will run\nin parallel to public\nhealth efforts"
+            },
+            {
+              "level": 0,
+              "text": "Our priority is protecting campus communities in Washington by acting as good stewards"
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:22",
+          "id": 22,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630001,
+            "y": 2259062,
+            "w": 2296069,
+            "h": 3447098
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Maintain signage to remind groups to stand at least 6 feet apart and avoid congregating in common areas"
+            },
+            {
+              "level": 1,
+              "text": "Note: Follow WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 1,
+              "text": "Roommates and suitemates treated as a family unit; assign students with pre-existing health conditions to singles"
+            },
+            {
+              "level": 1,
+              "text": "Consider installing plexiglass partitions in areas where residential  staff and residents come into close contact (e.g., mail desks)"
+            },
+            {
+              "level": 1,
+              "text": "Implement floor markings to promote physical distancing (e.g., where to stand in line, where to walk)"
+            },
+            {
+              "level": 1,
+              "text": "Manage staff schedules to allow for physical distancing whenever possible in staff spaces"
+            },
+            {
+              "level": 1,
+              "text": "For shared bathrooms, create a staggered bathroom schedule to reduce the amount of people using the facilities at the same time"
+            },
+            {
+              "level": 1,
+              "text": "For shared showers, consider assigning residents to specific showers or limiting use of showers to every other stall"
+            },
+            {
+              "level": 1,
+              "text": "Designate specific residence halls or buildings to isolate students/staff for quarantine or isolation periods as needed"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:19",
+          "id": 19,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222498,
+            "y": 3278555,
+            "w": 8588502,
+            "h": 1246495
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Source: CDC, US Shared or Congregate Housing; CDC, US Correctional and Detention Facilities, Association of College \u0026 University Housing Officers-International, Other State\u0027s Guidance"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:27",
+          "id": 27,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 630000,
+            "y": 6399163,
+            "w": 10933354,
+            "h": 153888
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Cleaning and sanitizing"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:35",
+          "id": 35,
+          "name": "Rounded Rectangle 34",
+          "bbox": {
+            "x": 3222493,
+            "y": 956190,
+            "w": 4023360,
+            "h": 397988
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Physical distancing"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:39",
+          "id": 39,
+          "name": "Rounded Rectangle 38",
+          "bbox": {
+            "x": 3222497,
+            "y": 2873941,
+            "w": 4023360,
+            "h": 397988
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Require staff with COVID-19 symptoms to remain home until they are symptom-free for ten days and three days without medication (whichever longer)"
+            },
+            {
+              "level": 1,
+              "text": "Ask staff to self-quarantine for 14-days from symptom onset or test positivity of the case per Washington public health guidelines if confirmed to have COVID-19 or exposed"
+            },
+            {
+              "level": 1,
+              "text": "Provide employees with face coverings and keep face coverings clean \u2013 follow WA reopening guidelines and WA Labor and Industries guidelines for masks"
+            },
+            {
+              "level": 1,
+              "text": "Train all staff on the importance of frequent handwashing, the use of hand sanitizers with at least 60% alcohol content, and give them clear instruction to avoid touching hands to face"
+            },
+            {
+              "level": 1,
+              "text": "Educate workers in the language they understand best about coronavirus and how to prevent transmission, and the institution\u0027s COVID-19 policies."
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:54",
+          "id": 54,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222498,
+            "y": 5148749,
+            "w": 8588502,
+            "h": 969496
+          },
+          "z": 8
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Staff health and personal hygiene"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:55",
+          "id": 55,
+          "name": "Rounded Rectangle 34",
+          "bbox": {
+            "x": 3222497,
+            "y": 4700553,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 9
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "RESIDENCES"
+            }
+          ],
+          "key": "ppt/slides/slide16.xml#textbox:70",
+          "id": 70,
+          "name": "TextBox 69",
+          "bbox": {
+            "x": 8335476,
+            "y": 0,
+            "w": 2759242,
+            "h": 338554
+          },
+          "z": 10
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "elements": [
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Recommended protocols for campus residences to resume operations (2/2)"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:3",
+          "id": 3,
+          "name": "Title 2",
+          "bbox": {
+            "x": 629999,
+            "y": 622800,
+            "w": 11266717,
+            "h": 332399
+          },
+          "z": 0
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Supporting a common"
+            },
+            {
+              "level": 0,
+              "text": "\u201Cnew normal\u201D foundation"
+            },
+            {
+              "level": 0,
+              "text": "to mitigate COVID-19"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:20",
+          "id": 20,
+          "name": "Rectangle 19",
+          "bbox": {
+            "x": 630000,
+            "y": 1202106,
+            "w": 2296074,
+            "h": 1014174
+          },
+          "z": 1
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "The following checklist provides adaptations for campus residences to resume operations"
+            },
+            {
+              "level": 0,
+              "text": "These actions will run\nin parallel to public\nhealth efforts"
+            },
+            {
+              "level": 0,
+              "text": "Our priority is protecting campus communities in Washington by acting as good stewards"
+            },
+            {
+              "level": 0,
+              "text": "Subject to change based on public health guidance"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:22",
+          "id": 22,
+          "name": "Title 2",
+          "bbox": {
+            "x": 630001,
+            "y": 2217224,
+            "w": 2296069,
+            "h": 3447098
+          },
+          "z": 2
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "All staff and residents must wear face masks throughout the building (exception for residents within their own rooms)"
+            },
+            {
+              "level": 1,
+              "text": "When possible, rooms should remain vacant for 48 hours after check-out and prior to cleaning"
+            },
+            {
+              "level": 1,
+              "text": "Have the ability to log all staff and residents that come on-premise for purposes of supporting public health contact tracing"
+            },
+            {
+              "level": 1,
+              "text": "Ask workers resuming on-premise work to confirm they have not experienced symptoms for 14 days from symptom onset or test positivity of the case prior to return"
+            },
+            {
+              "level": 1,
+              "text": "Communication of Safe Back-to-School Plan to all staff and residents, including available contact to report violations"
+            },
+            {
+              "level": 1,
+              "text": "Use no-touch trash cans where possible on the property"
+            },
+            {
+              "level": 1,
+              "text": "Check appropriate functioning of HVAC"
+            },
+            {
+              "level": 1,
+              "text": "Symptomatic residents should avoid contact with other \u2013 follow DOH guidelines for individuals with symptoms"
+            },
+            {
+              "level": 1,
+              "text": "Develop plan for how suspected COVID-19 cases will be isolated, evaluated, tested, and provided necessary wraparound services (e.g., medical care, food)"
+            },
+            {
+              "level": 1,
+              "text": "Ensure that physical locations have been identified to isolate confirmed COVID-19 cases, and consider designating one staff member to attend to sick residents"
+            },
+            {
+              "level": 1,
+              "text": "Create and test communications plans to disseminate critical information to residents/staff"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:19",
+          "id": 19,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222495,
+            "y": 1562291,
+            "w": 8853920,
+            "h": 1523494
+          },
+          "z": 3
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Facility safety"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:39",
+          "id": 39,
+          "name": "Rounded Rectangle 38",
+          "bbox": {
+            "x": 3222493,
+            "y": 1116864,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 4
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Resident expectations"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:32",
+          "id": 32,
+          "name": "Rounded Rectangle 31",
+          "bbox": {
+            "x": 3222495,
+            "y": 3255998,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 5
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Employee support"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:56",
+          "id": 56,
+          "name": "Rounded Rectangle 55",
+          "bbox": {
+            "x": 3222496,
+            "y": 4727932,
+            "w": 4024340,
+            "h": 397988
+          },
+          "z": 6
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Visible entry point signage for all staff and residents on shared responsibilities (including proper hygiene \u0026 sanitization, physical distancing, PPE guidance and information for reporting concerns)"
+            },
+            {
+              "level": 1,
+              "text": "Make safety guidelines publicly available"
+            },
+            {
+              "level": 1,
+              "text": "Consider using social media and website to educate residents on protocols and what to expect when entering on-campus housing facilities (e.g., digital check-in requirements)"
+            },
+            {
+              "level": 1,
+              "text": "Remind residents of any quarantine requirements as defined by the local health jurisdiction and instruct them that compliance will be monitored"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:63",
+          "id": 63,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222498,
+            "y": 3711070,
+            "w": 8339499,
+            "h": 830997
+          },
+          "z": 7
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 1,
+              "text": "Adhere to state and federal law for health and safety during COVID-19 including WA State\u0027s \u0022Safe Start\u0022 guidelines and WA Labor \u0026 Industries guidelines"
+            },
+            {
+              "level": 1,
+              "text": "Mitigate anxiety by recognizing fear in returning, communicating transparently, listening and surveying staff regularly"
+            },
+            {
+              "level": 1,
+              "text": "Provide early reopening communication by keeping workforce informed as soon as appropriate"
+            },
+            {
+              "level": 1,
+              "text": "Reinforce training after Day One by providing ongoing methods of additional training to reinforce messaging and changes"
+            },
+            {
+              "level": 1,
+              "text": "Ensure staff that live in residence halls can follow all resident health/safety protocols (e.g. quarantining upon arrival)"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:64",
+          "id": 64,
+          "name": "ee4pContent3",
+          "bbox": {
+            "x": 3222498,
+            "y": 5166907,
+            "w": 8339499,
+            "h": 692497
+          },
+          "z": 8
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "Source: CDC, US Shared or Congregate Housing; CDC, US Correctional and Detention Facilities"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:103",
+          "id": 103,
+          "name": "ee4pFootnotes",
+          "bbox": {
+            "x": 630000,
+            "y": 6313768,
+            "w": 9030914,
+            "h": 153888
+          },
+          "z": 9
+        },
+        {
+          "type": "textbox",
+          "paragraphs": [
+            {
+              "level": 0,
+              "text": "RESIDENCES"
+            }
+          ],
+          "key": "ppt/slides/slide17.xml#textbox:46",
+          "id": 46,
+          "name": "TextBox 45",
+          "bbox": {
+            "x": 8335476,
+            "y": 0,
+            "w": 2759242,
+            "h": 338554
+          },
+          "z": 10
+        }
+      ]
+    }
+  ]
+}
