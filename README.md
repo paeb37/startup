@@ -4,6 +4,7 @@ Minimal ASP.NET Core API for parsing PowerPoint decks into structured JSON and r
 
 ## Prerequisites
 - .NET 9 SDK (`dotnet --version`)
+- Python 3.10+ (`python3 --version`) for the Flask instruction parser
 - LibreOffice (`soffice`) available on `PATH` or via `SOFFICE_PATH` if you plan to use `/api/render`
 
 ## Run the API
@@ -28,12 +29,22 @@ dotnet run --project apps/api-dotnet/Dexter.WebApi.csproj
 ```
 
 ## Endpoints
-- `POST /api/extract` — accepts multipart field `file` with a `.pptx`, returns deck metadata and slide contents.
+- `POST /api/extract` — accepts multipart field `file` with a `.pptx`; optional `instructions` text is forwarded to Flask for rule inference before local redaction.
 - `POST /api/render` — accepts multipart field `file`, converts the deck to PDF for inline viewing; requires LibreOffice.
+
+### Instruction Parser (Flask)
+```bash
+cd apps/python-semantic
+python3 -m venv .venv
+source .venv/bin/activate   # .venv\Scripts\activate on Windows
+pip install -r requirements.txt
+FLASK_APP=app.py flask run --host 0.0.0.0 --port 8000 --debug
+```
 
 ### Quick test
 ```bash
 curl -F "file=@/absolute/path/to/deck.pptx" http://localhost:5100/api/extract
+curl -F "file=@/absolute/path/to/deck.pptx" -F "instructions=Redact client names and revenue" http://localhost:5100/api/extract
 ```
 
 Example response:
