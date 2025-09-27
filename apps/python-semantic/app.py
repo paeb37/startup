@@ -137,7 +137,7 @@ def annotate():
                 replacement = llm_result.get("replacementToken") or rules.get("replacementToken")
 
                 if targets:
-                    rules["keywords"] = [t for t in targets if isinstance(t, str) and t.strip()]
+                    rules["keywords"] = [t for t in targets if isinstance(t, str) and t.strip()] # type: ignore
                     if rules["keywords"]:
                         rules["maskClientNames"] = True
 

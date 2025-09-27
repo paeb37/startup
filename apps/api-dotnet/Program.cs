@@ -17,7 +17,6 @@ using P = DocumentFormat.OpenXml.Presentation;
 using System.Text.Json.Serialization.Metadata;
 using System.ComponentModel;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.FileProviders;
 using DotNetEnv;
 
 
@@ -405,8 +404,6 @@ public static partial class Program
             pptx_path = pptxRelative,
             json_path = jsonRelative,
             pdf_path = pdfRelative,
-            pdf_url = ToPublicFileUrl(pdfRelative),
-            instructions,
             slide_count = deck.slideCount,
             created_at = now,
             updated_at = now
@@ -418,11 +415,9 @@ public static partial class Program
         foreach (var slide in deck.slides)
         {
             var text = ExtractSlidePlainText(slide);
-            if (string.IsNullOrWhiteSpace(text))
-                continue;
 
             float[]? embedding = null;
-            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey))
+            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(text))
             {
                 embedding = await TryGenerateEmbeddingAsync(text, settings.OpenAiKey!, settings.EmbeddingModel, cancellationToken);
             }
@@ -432,7 +427,6 @@ public static partial class Program
                 id = Guid.NewGuid(),
                 deck_id = deckId,
                 slide_no = slide.index,
-                content = text,
                 embedding,
                 created_at = now,
                 updated_at = now
@@ -479,14 +473,6 @@ public static partial class Program
         {
             return fullPath.Replace(Path.DirectorySeparatorChar, '/');
         }
-    }
-
-    private static string ToPublicFileUrl(string relativeStoragePath)
-    {
-        if (string.IsNullOrWhiteSpace(relativeStoragePath))
-            return string.Empty;
-
-        return "/files/" + relativeStoragePath.TrimStart('/');
     }
 
     private static string ExtractSlidePlainText(SlideDto slide)

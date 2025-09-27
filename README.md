@@ -52,8 +52,6 @@ create table if not exists decks (
   pptx_path text not null,
   json_path text not null,
   pdf_path text not null,
-  pdf_url text not null,
-  instructions text,
   slide_count integer not null,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -63,7 +61,6 @@ create table if not exists slides (
   id uuid primary key,
   deck_id uuid references decks(id) on delete cascade,
   slide_no integer not null,
-  content text,
   embedding vector(1536),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
