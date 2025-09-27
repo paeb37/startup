@@ -27,8 +27,9 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, Optional
 from pathlib import Path
+from time import perf_counter
+from typing import Any, Dict, Optional
 
 try:
     from openai import OpenAI
@@ -37,6 +38,12 @@ except ImportError as exc:  # pragma: no cover - import guard for local dev
         "The OpenAI Python SDK is required. Install with 'pip install openai'."
     ) from exc
 
+try:
+    from dotenv import load_dotenv
+except ImportError as exc:  # pragma: no cover - import guard for local dev
+    raise SystemExit(
+        "python-dotenv is required. Install with 'pip install python-dotenv'."
+    ) from exc
 
 DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5")
 
@@ -47,31 +54,16 @@ into structured rules. Always respond with compact JSON matching this schema:
   "replacementToken": "[REDACTED_CLIENT]"
 }
 Only include client names that are explicitly implied by the instruction plus
-the provided context. If unsure, return an empty list and describe the
-ambiguity in the notes field.  Do not hallucinate additional fields."""
+the provided context. If unsure, return an empty list.
+Do not hallucinate additional fields."""
 
-
-def build_user_prompt(instructions: str, context: Optional[Dict[str, Any]]) -> str:
+def build_user_prompt(instructions: str) -> str:
     """Compose the user message fed into the Responses API."""
+
     prompt_parts = [
         "# Instruction",
         instructions.strip() or "(none provided)",
     ]
-
-    if context:
-        pretty = json.dumps(context, indent=2, ensure_ascii=False)
-        prompt_parts.extend([
-            "\n# Deck context",
-            pretty,
-            "\n# Guidance",
-            "Use the context only to resolve which single client/company the user"
-            " is referencing. Ignore any text marked as already redacted.",
-        ])
-    else:
-        prompt_parts.append(
-            "\n(No additional deck context supplied. Default to parsing the"
-            " instruction alone.)"
-        )
 
     prompt_parts.extend(
         [
@@ -82,31 +74,16 @@ def build_user_prompt(instructions: str, context: Optional[Dict[str, Any]]) -> s
 
     return "\n".join(prompt_parts)
 
-
 def load_env_files() -> None:
-    """Best-effort load of .env files near the script and project root."""
+    """Load the repository-wide .env if present using python-dotenv."""
 
-    root_env = Path(__file__).resolve().parents[1] / ".env"
-
-    if not root_env.exists() or not root_env.is_file():
-        return
-
-    for raw_line in root_env.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            os.environ.setdefault(key, value)
+    root_env = Path(__file__).resolve().parents[2] / ".env"
+    load_dotenv(root_env)
 
 
 def call_responses_api(
     instructions: str,
-    context: Optional[Dict[str, Any]] = None,
-    model: str = DEFAULT_MODEL,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Invoke the OpenAI Responses API and parse the JSON payload."""
 
@@ -116,37 +93,38 @@ def call_responses_api(
             "OPENAI_API_KEY is not set. Export it before running this script."
         )
 
+    if not model:
+        model = os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
+
     client = OpenAI(api_key=api_key)
-    user_message = build_user_prompt(instructions, context)
+    user_message = build_user_prompt(instructions)
 
     # MAIN LLM CALL STARTS HERE
+    started = perf_counter()
     response = client.responses.create(
         model=model,
+        instructions=SYSTEM_PROMPT,
         input=[
             {
-                "role": "system",
-                "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT},
-                ],
-            },
-            {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": user_message},
-                ],
+                "content": user_message,
             },
         ],
-        response_format={"type": "json_object"},
-        max_output_tokens=400,
-        temperature=0,
     )
+    latency = perf_counter() - started
 
     content = response.output_text
 
     try:
-        return json.loads(content)
+        result = json.loads(content)
     except json.JSONDecodeError as exc:  # pragma: no cover
         raise RuntimeError(f"Model did not return valid JSON: {content}") from exc
+
+    # print latency
+    
+    print(f"[timing] responses.create latency: {latency:.3f}s", file=sys.stderr)
+
+    return result
 
 
 def load_context(path: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -170,22 +148,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Natural-language redaction request (wrap in quotes)",
     )
 
-    '''
-    parser.add_argument(
-        "--context",
-        help="Optional path to JSON snippet (e.g., trimmed /api/upload output)",
-    )
-    parser.add_argument(
-        "--model",
-        default=DEFAULT_MODEL,
-        help=f"Responses model to use (default: {DEFAULT_MODEL})",
-    )
-    '''
-    
     args = parser.parse_args(argv)
 
-    context = load_context(args.context)
-    result = call_responses_api(args.instructions, context=context, model=args.model)
+    context_path = getattr(args, "context", None)
+    model_arg = getattr(args, "model", os.environ.get("OPENAI_MODEL", DEFAULT_MODEL))
+
+    context = load_context(context_path)
+    result = call_responses_api(args.instructions, model=model_arg)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
