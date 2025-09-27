@@ -7,6 +7,7 @@ using System.Linq;
 using System.IO;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -15,13 +16,27 @@ using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 using System.Text.Json.Serialization.Metadata;
 using System.ComponentModel;
+using Microsoft.Extensions.Configuration;
+using DotNetEnv;
+
 
 // ----------------------------- Web app --------------------------------------
 
 public static partial class Program
 {
+    private static readonly HttpClient SharedHttpClient = new();
+
     public static async Task Main(string[] args)
     {
+        try
+        {
+            Env.TraversePath().Load();
+        }
+        catch (FileNotFoundException)
+        {
+            // .env is optional; ignore if not found.
+        }
+
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -79,17 +94,36 @@ public static partial class Program
                     TypeInfoResolver = resolver
                 };
 
-                var pdfPath = await PersistArtifactsAsync(ms, deck, jsonOptions, file.FileName, storageRoot);
+                var artifacts = await PersistArtifactsAsync(ms, deck, jsonOptions, file.FileName, storageRoot);
 
-                if (!System.IO.File.Exists(pdfPath))
+                if (!System.IO.File.Exists(artifacts.PdfPath))
                     return Results.StatusCode(500);
 
-                var pdfBytes = await System.IO.File.ReadAllBytesAsync(pdfPath);
+                var pdfBytes = await System.IO.File.ReadAllBytesAsync(artifacts.PdfPath);
                 var pdfInfo = new
                 {
-                    fileName = Path.GetFileName(pdfPath),
+                    fileName = Path.GetFileName(artifacts.PdfPath),
                     base64 = Convert.ToBase64String(pdfBytes)
                 };
+
+                var supabaseSettings = ReadSupabaseSettings(app.Configuration);
+                if (supabaseSettings != null)
+                {
+                    try
+                    {
+                        await PersistDeckToSupabaseAsync(
+                            deck,
+                            instructions,
+                            artifacts,
+                            supabaseSettings,
+                            storageRoot,
+                            req.HttpContext.RequestAborted);
+                    }
+                    catch (Exception supabaseEx)
+                    {
+                        Console.Error.WriteLine($"Supabase persistence failed: {supabaseEx.Message}");
+                    }
+                }
 
                 if (string.IsNullOrWhiteSpace(instructions))
                 {
@@ -281,7 +315,7 @@ public static partial class Program
         await app.RunAsync();
     }
 
-    private static async Task<string> PersistArtifactsAsync(Stream pptxStream, DeckDto deck, JsonSerializerOptions jsonOptions, string originalFileName, string storageRoot)
+    private static async Task<DeckArtifactPaths> PersistArtifactsAsync(Stream pptxStream, DeckDto deck, JsonSerializerOptions jsonOptions, string originalFileName, string storageRoot)
     {
         var baseName = SanitizeBaseName(originalFileName);
         Directory.CreateDirectory(storageRoot);
@@ -318,7 +352,215 @@ public static partial class Program
 
         pptxStream.Position = 0;
 
-        return expectedPdf;
+        return new DeckArtifactPaths(
+            BaseName: baseName,
+            PptxPath: pptxPath,
+            JsonPath: jsonPath,
+            PdfPath: expectedPdf);
+    }
+
+    private static SupabaseSettings? ReadSupabaseSettings(IConfiguration configuration)
+    {
+        var url = configuration["SUPABASE_URL"] ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
+        var serviceKey = configuration["SUPABASE_SERVICE_ROLE_KEY"] ?? Environment.GetEnvironmentVariable("SUPABASE_SERVICE_ROLE_KEY");
+
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(serviceKey))
+            return null;
+
+        var decksTable = configuration["SUPABASE_DECKS_TABLE"] ?? Environment.GetEnvironmentVariable("SUPABASE_DECKS_TABLE") ?? "decks";
+        var slidesTable = configuration["SUPABASE_SLIDES_TABLE"] ?? Environment.GetEnvironmentVariable("SUPABASE_SLIDES_TABLE") ?? "slides";
+        var embeddingModel = configuration["OPENAI_EMBEDDING_MODEL"] ?? Environment.GetEnvironmentVariable("OPENAI_EMBEDDING_MODEL") ?? "text-embedding-3-small";
+        var openAiKey = configuration["OPENAI_API_KEY"] ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+
+        return new SupabaseSettings(
+            Url: url.TrimEnd('/'),
+            ServiceKey: serviceKey,
+            DecksTable: decksTable,
+            SlidesTable: slidesTable,
+            OpenAiKey: openAiKey,
+            EmbeddingModel: embeddingModel);
+    }
+
+    private static async Task PersistDeckToSupabaseAsync(
+        DeckDto deck,
+        string? instructions,
+        DeckArtifactPaths artifacts,
+        SupabaseSettings settings,
+        string storageRoot,
+        CancellationToken cancellationToken)
+    {
+        var deckId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        var pptxRelative = ToRelativeStoragePath(storageRoot, artifacts.PptxPath);
+        var jsonRelative = ToRelativeStoragePath(storageRoot, artifacts.JsonPath);
+        var pdfRelative = ToRelativeStoragePath(storageRoot, artifacts.PdfPath);
+
+        var deckRecord = new
+        {
+            id = deckId,
+            deck_name = artifacts.BaseName,
+            original_filename = deck.file,
+            pptx_path = pptxRelative,
+            json_path = jsonRelative,
+            pdf_path = pdfRelative,
+            slide_count = deck.slideCount,
+            created_at = now,
+            updated_at = now
+        };
+
+        await PostgrestInsertAsync(settings, settings.DecksTable, deckRecord, returnRepresentation: false, cancellationToken);
+
+        var slidePayload = new List<object>();
+        foreach (var slide in deck.slides)
+        {
+            var text = ExtractSlidePlainText(slide);
+
+            float[]? embedding = null;
+            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(text))
+            {
+                embedding = await TryGenerateEmbeddingAsync(text, settings.OpenAiKey!, settings.EmbeddingModel, cancellationToken);
+            }
+
+            slidePayload.Add(new
+            {
+                id = Guid.NewGuid(),
+                deck_id = deckId,
+                slide_no = slide.index,
+                embedding,
+                created_at = now,
+                updated_at = now
+            });
+        }
+
+        if (slidePayload.Count > 0)
+        {
+            await PostgrestInsertAsync(settings, settings.SlidesTable, slidePayload, returnRepresentation: false, cancellationToken);
+        }
+    }
+
+    private static async Task PostgrestInsertAsync(SupabaseSettings settings, string table, object payload, bool returnRepresentation, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{settings.Url}/rest/v1/{table}");
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Add("Prefer", returnRepresentation ? "return=representation" : "return=minimal");
+
+        var json = JsonSerializer.Serialize(payload);
+        request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase insert into '{table}' failed ({(int)response.StatusCode}): {body}");
+        }
+    }
+
+    private static string ToRelativeStoragePath(string storageRoot, string fullPath)
+    {
+        try
+        {
+            var relative = Path.GetRelativePath(storageRoot, fullPath);
+            if (string.IsNullOrWhiteSpace(relative) || relative.StartsWith(".."))
+            {
+                relative = Path.GetFileName(fullPath);
+            }
+
+            return relative.Replace(Path.DirectorySeparatorChar, '/');
+        }
+        catch
+        {
+            return fullPath.Replace(Path.DirectorySeparatorChar, '/');
+        }
+    }
+
+    private static string ExtractSlidePlainText(SlideDto slide)
+    {
+        var sb = new StringBuilder();
+
+        foreach (var element in slide.elements)
+        {
+            switch (element)
+            {
+                case TextboxDto textbox:
+                    AppendParagraphs(sb, textbox.paragraphs);
+                    break;
+                case TableDto table:
+                    foreach (var row in table.cells)
+                    {
+                        if (row is null) continue;
+                        foreach (var cell in row)
+                        {
+                            if (cell is null) continue;
+                            AppendParagraphs(sb, cell.paragraphs);
+                        }
+                    }
+                    break;
+                case PictureDto picture when !string.IsNullOrWhiteSpace(picture.name):
+                    sb.AppendLine(picture.name);
+                    break;
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static void AppendParagraphs(StringBuilder sb, IEnumerable<ParagraphDto> paragraphs)
+    {
+        foreach (var paragraph in paragraphs)
+        {
+            if (string.IsNullOrWhiteSpace(paragraph.text))
+                continue;
+
+            sb.AppendLine(paragraph.text.Trim());
+        }
+    }
+
+    private static async Task<float[]?> TryGenerateEmbeddingAsync(string input, string apiKey, string model, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return null;
+
+        var payload = new
+        {
+            model,
+            input
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/embeddings");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            // Swallow embedding failures but log for observability.
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            Console.Error.WriteLine($"Embedding request failed ({(int)response.StatusCode}): {body}");
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var embeddingResponse = await JsonSerializer.DeserializeAsync<OpenAiEmbeddingResponse>(stream, cancellationToken: cancellationToken);
+        var vector = embeddingResponse?.Data?.FirstOrDefault()?.Embedding;
+        return vector?.ToArray();
+    }
+
+    private sealed record DeckArtifactPaths(string BaseName, string PptxPath, string JsonPath, string PdfPath);
+
+    private sealed record SupabaseSettings(string Url, string ServiceKey, string DecksTable, string SlidesTable, string? OpenAiKey, string EmbeddingModel);
+
+    private sealed class OpenAiEmbeddingResponse
+    {
+        [JsonPropertyName("data")]
+        public List<OpenAiEmbeddingDatum> Data { get; set; } = new();
+    }
+
+    private sealed class OpenAiEmbeddingDatum
+    {
+        [JsonPropertyName("embedding")]
+        public List<float> Embedding { get; set; } = new();
     }
 
     private static string SanitizeBaseName(string originalFileName)
