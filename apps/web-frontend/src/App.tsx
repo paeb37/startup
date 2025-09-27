@@ -560,7 +560,7 @@ function UploadPrepView({
     setError(null);
 
     try {
-      const { deck, render } = await uploadDeck(file);
+      const { deck, render } = await uploadDeck(file, instructions);
       onComplete({
         deck,
         render,
@@ -710,7 +710,7 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
     setSelectedPage(1);
 
     try {
-      const { deck, render } = await uploadDeck(file);
+      const { deck, render } = await uploadDeck(file, instructions);
       setResult(deck);
       setRender(render);
       setSelectedPage(1);
@@ -917,41 +917,51 @@ function isDeck(res: ExtractResponse): res is Deck {
   return (res as Deck)?.slides !== undefined;
 }
 
-async function uploadDeck(file: File): Promise<{ deck: ExtractResponse; render: RenderResult }> {
-  const fd = new FormData();
-  fd.append("file", file);
+async function uploadDeck(file: File, instructions?: string): Promise<{ deck: ExtractResponse; render: RenderResult }> {
+  const form = new FormData();
+  form.append("file", file);
+  if (instructions && instructions.trim()) {
+    form.append("instructions", instructions.trim());
+  }
 
-  const [jsonRes, pdfBlob] = await Promise.all([
-    fetch("/api/extract", {
-      method: "POST",
-      body: fd,
-      headers: { Accept: "application/json" },
-    }).then(async (r) => {
-      try {
-        return await r.json();
-      } catch {
-        return { error: "Failed to parse extract response" } as ExtractResponse;
-      }
-    }),
-    fetch("/api/render", {
-      method: "POST",
-      body: fd,
-      headers: { Accept: "application/pdf" },
-    }).then(async (r) => {
-      if (!r.ok) {
-        const message = await r.text().catch(() => "");
-        throw new Error(message || "PDF render failed");
-      }
-      return r.blob();
-    }),
-  ]);
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    body: form,
+    headers: { Accept: "application/json" },
+  });
 
-  const deck = jsonRes as ExtractResponse;
+  let payload: any;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("Failed to parse upload response");
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.error ?? "Upload failed");
+  }
+
+  const deck = (payload?.deck ?? payload) as ExtractResponse;
+  if ((deck as any)?.error) {
+    throw new Error((deck as any).error);
+  }
+
+  const pdfInfo = payload?.pdf;
+  if (!pdfInfo?.base64) {
+    throw new Error("PDF missing from upload response");
+  }
+
+  const byteString = atob(pdfInfo.base64);
+  const pdfBuffer = new Uint8Array(byteString.length);
+  for (let i = 0; i < byteString.length; i++) {
+    pdfBuffer[i] = byteString.charCodeAt(i);
+  }
+
+  const pdfBlob = new Blob([pdfBuffer], { type: "application/pdf" });
   const pdfUrl = URL.createObjectURL(pdfBlob);
 
   try {
-    const buf = await pdfBlob.arrayBuffer();
-    const doc = await getDocument({ data: buf }).promise;
+    const doc = await getDocument({ data: pdfBuffer }).promise;
     return { deck, render: { pdfUrl, doc } };
   } catch (err) {
     URL.revokeObjectURL(pdfUrl);

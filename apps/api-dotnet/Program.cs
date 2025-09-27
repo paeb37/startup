@@ -27,11 +27,13 @@ public static partial class Program
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
             p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
+        var storageRoot = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "storage"));
+
         var app = builder.Build();
         app.UseCors();
 
-        // POST /api/extract: accept multipart "file", return deck JSON
-        app.MapPost("/api/extract", async (HttpRequest req) =>
+        // POST /api/upload: accept multipart "file" (optional "instructions"), persist artifacts, return deck + PDF
+        app.MapPost("/api/upload", async (HttpRequest req) =>
         {
             if (!req.HasFormContentType)
                 return Results.BadRequest(new { error = "multipart/form-data required" });
@@ -54,7 +56,6 @@ public static partial class Program
 
                 var deck = ExtractDeck(ms, file.FileName);
 
-                // Configure polymorphic serialization for ElementDto
                 var resolver = new DefaultJsonTypeInfoResolver();
                 resolver.Modifiers.Add(info =>
                 {
@@ -78,9 +79,27 @@ public static partial class Program
                     TypeInfoResolver = resolver
                 };
 
+                var pdfPath = await PersistArtifactsAsync(ms, deck, jsonOptions, file.FileName, storageRoot);
+
+                if (!System.IO.File.Exists(pdfPath))
+                    return Results.StatusCode(500);
+
+                var pdfBytes = await System.IO.File.ReadAllBytesAsync(pdfPath);
+                var pdfInfo = new
+                {
+                    fileName = Path.GetFileName(pdfPath),
+                    base64 = Convert.ToBase64String(pdfBytes)
+                };
+
                 if (string.IsNullOrWhiteSpace(instructions))
                 {
-                    return Results.Text(JsonSerializer.Serialize(deck, jsonOptions), "application/json");
+                    var result = new
+                    {
+                        deck,
+                        pdf = pdfInfo
+                    };
+
+                    return Results.Text(JsonSerializer.Serialize(result, jsonOptions), "application/json");
                 }
 
                 var semanticUrl = app.Configuration["SEMANTIC_URL"]
@@ -113,6 +132,7 @@ public static partial class Program
                             return Results.Text(JsonSerializer.Serialize(new
                             {
                                 deck,
+                                pdf = pdfInfo,
                                 redaction = new
                                 {
                                     error = "semantic_service_invalid_response",
@@ -160,7 +180,8 @@ public static partial class Program
                             deck,
                             redactions,
                             stats,
-                            export = exportInfo
+                            export = exportInfo,
+                            pdf = pdfInfo
                         };
 
                         return Results.Text(JsonSerializer.Serialize(result, jsonOptions), "application/json");
@@ -169,6 +190,7 @@ public static partial class Program
                     return Results.Text(JsonSerializer.Serialize(new
                     {
                         deck,
+                        pdf = pdfInfo,
                         redaction = new
                         {
                             error = "semantic_service_failed",
@@ -182,6 +204,7 @@ public static partial class Program
                     return Results.Text(JsonSerializer.Serialize(new
                     {
                         deck,
+                        pdf = pdfInfo,
                         redaction = new
                         {
                             error = "semantic_service_unavailable",
@@ -258,12 +281,82 @@ public static partial class Program
         await app.RunAsync();
     }
 
+    private static async Task<string> PersistArtifactsAsync(Stream pptxStream, DeckDto deck, JsonSerializerOptions jsonOptions, string originalFileName, string storageRoot)
+    {
+        var baseName = SanitizeBaseName(originalFileName);
+        Directory.CreateDirectory(storageRoot);
+
+        var targetDir = Path.Combine(storageRoot, baseName);
+        Directory.CreateDirectory(targetDir);
+
+        var pptxPath = Path.Combine(targetDir, $"{baseName}.pptx");
+        pptxStream.Position = 0;
+        await using (var fileStream = File.Create(pptxPath))
+        {
+            await pptxStream.CopyToAsync(fileStream);
+        }
+
+        var jsonPath = Path.Combine(targetDir, $"{baseName}.json");
+        var deckJson = JsonSerializer.Serialize(deck, jsonOptions);
+        await File.WriteAllTextAsync(jsonPath, deckJson);
+
+        await ConvertPptxToPdfAsync(pptxPath, targetDir);
+
+        var expectedPdf = Path.Combine(targetDir, $"{baseName}.pdf");
+        if (!File.Exists(expectedPdf))
+        {
+            var generated = Directory.GetFiles(targetDir, "*.pdf").FirstOrDefault();
+            if (generated != null)
+            {
+                if (File.Exists(expectedPdf))
+                {
+                    File.Delete(expectedPdf);
+                }
+                File.Move(generated, expectedPdf);
+            }
+        }
+
+        pptxStream.Position = 0;
+
+        return expectedPdf;
+    }
+
+    private static string SanitizeBaseName(string originalFileName)
+    {
+        var baseName = Path.GetFileNameWithoutExtension(originalFileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+            return "deck";
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(baseName.Length);
+        foreach (var ch in baseName)
+        {
+            if (invalidChars.Contains(ch) || char.IsWhiteSpace(ch))
+            {
+                builder.Append('_');
+            }
+            else
+            {
+                builder.Append(ch);
+            }
+        }
+
+        var sanitized = builder.ToString().Trim('_');
+        return string.IsNullOrWhiteSpace(sanitized) ? "deck" : sanitized;
+    }
+
     // --------------------------- LibreOffice conversion ----------------------
 
     private static async Task ConvertPptxToPdfAsync(string inputPath, string outDir)
     {
         // Use SOFFICE_PATH env var if you want a fixed path; else rely on PATH
         var soffice = Environment.GetEnvironmentVariable("SOFFICE_PATH") ?? "soffice";
+
+        var profileDir = Path.Combine(Path.GetTempPath(), "libreoffice-profile", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(profileDir);
+        var profileUri = new Uri(profileDir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+            ? profileDir
+            : profileDir + Path.DirectorySeparatorChar).AbsoluteUri;
 
         var psi = new ProcessStartInfo
         {
@@ -275,6 +368,10 @@ public static partial class Program
         };
         // soffice --headless --convert-to pdf --outdir <outDir> <inputPath>
         psi.ArgumentList.Add("--headless");
+        psi.ArgumentList.Add("--nologo");
+        psi.ArgumentList.Add("--nofirststartwizard");
+        psi.ArgumentList.Add("--norestore");
+        psi.ArgumentList.Add($"-env:UserInstallation={profileUri}");
         psi.ArgumentList.Add("--convert-to");
         psi.ArgumentList.Add("pdf");
         psi.ArgumentList.Add("--outdir");
@@ -286,9 +383,18 @@ public static partial class Program
         var stdErr = await proc.StandardError.ReadToEndAsync();
         await proc.WaitForExitAsync();
 
+        try
+        {
+            Directory.Delete(profileDir, recursive: true);
+        }
+        catch
+        {
+            // best effort cleanup
+        }
+
         if (proc.ExitCode != 0)
         {
-            throw new Exception($"LibreOffice conversion failed (code {proc.ExitCode}). stderr: {stdErr}");
+            throw new Exception($"LibreOffice conversion failed (code {proc.ExitCode}). stderr: {stdErr}. stdout: {stdOut}");
         }
     }
 }
