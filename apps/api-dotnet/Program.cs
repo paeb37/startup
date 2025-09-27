@@ -17,6 +17,8 @@ using P = DocumentFormat.OpenXml.Presentation;
 using System.Text.Json.Serialization.Metadata;
 using System.ComponentModel;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using DotNetEnv;
 
 
 // ----------------------------- Web app --------------------------------------
@@ -27,6 +29,15 @@ public static partial class Program
 
     public static async Task Main(string[] args)
     {
+        try
+        {
+            Env.TraversePath().Load();
+        }
+        catch (FileNotFoundException)
+        {
+            // .env is optional; ignore if not found.
+        }
+
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
