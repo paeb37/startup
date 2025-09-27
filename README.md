@@ -22,8 +22,11 @@ The default launch profile exposes `http://localhost:5100`.
 - `SOFFICE_PATH`: `/Applications/LibreOffice.app/Contents/MacOS/soffice`
 - `SUPABASE_URL`: base URL of your Supabase instance (e.g. `https://abc.supabase.co`)
 - `SUPABASE_SERVICE_ROLE_KEY`: service role API key used for inserts
-- `OPENAI_API_KEY`: key used for slide embeddings (optional but recommended)
+- `SUPABASE_STORAGE_BUCKET`: Supabase Storage bucket name for deck assets (e.g. `decks`)
+- `SUPABASE_STORAGE_PREFIX`: optional folder prefix inside the bucket (defaults to none)
+- `OPENAI_API_KEY`: key used for embeddings, image captions, and table summaries
 - `OPENAI_EMBEDDING_MODEL`: embedding model name (defaults to `text-embedding-3-small`)
+- `OPENAI_VISION_MODEL`: OpenAI Responses model for vision/text summaries (defaults to `gpt-4o-mini`)
 - `SUPABASE_DECKS_TABLE`: override for the decks table name (defaults to `decks`)
 - `SUPABASE_SLIDES_TABLE`: override for the slides table name (defaults to `slides`)
 
@@ -35,7 +38,7 @@ dotnet run --project apps/api-dotnet/Dexter.WebApi.csproj
 ```
 
 ## Endpoints
-- `POST /api/upload` — accepts multipart field `file` (optional `instructions`); stores the artifacts under `apps/storage/<name>/` and returns deck JSON alongside a base64-encoded PDF preview.
+- `POST /api/upload` — accepts multipart field `file` (optional `instructions`); uploads the PPTX/JSON/PDF bundle to Supabase Storage and returns deck JSON alongside a base64-encoded PDF preview.
 - `POST /api/render` — accepts multipart field `file`, converts the deck to PDF for inline viewing; requires LibreOffice. (Primarily kept for tooling—`/api/upload` already returns the PDF.)
 
 ### Supabase schema
@@ -69,6 +72,10 @@ create table if not exists slides (
 create index if not exists slides_deck_id_slide_no_idx on slides(deck_id, slide_no);
 create index if not exists slides_embedding_idx on slides using ivfflat (embedding vector_l2_ops) with (lists = 100);
 ```
+
+The `pptx_path`, `json_path`, and `pdf_path` columns store the object path inside your Supabase Storage bucket (e.g. `my-prefix/3f0c1f2a9d5b4e42ac0cf5c9a6382a8a/deck.pdf`). Keep the bucket name itself in `SUPABASE_STORAGE_BUCKET`.
+
+When `OPENAI_API_KEY` is set the upload pipeline generates per-image summaries (stored on each picture element) and per-table summaries (stored on each table element) before creating the slide embeddings.
 
 Grant your service role access to both tables, or configure Supabase Row Level Security policies as needed for your workflow.
 

@@ -33,6 +33,7 @@ public sealed class PictureDto : ElementDto
 {
     public string? imgPath { get; set; }
     public long? bytes { get; set; }
+    public string? summary { get; set; }
 }
 
 public sealed class TableDto : ElementDto
@@ -42,6 +43,7 @@ public sealed class TableDto : ElementDto
     public long[]? colWidths { get; set; }
     public long[]? rowHeights { get; set; }
     public TableCellDto?[][] cells { get; set; } = Array.Empty<TableCellDto?[]>();
+    public string? summary { get; set; }
 }
 
 public class TableCellDto
@@ -67,4 +69,3 @@ public class ParagraphDto
     public int level { get; set; }
     public string text { get; set; } = "";
 }
-

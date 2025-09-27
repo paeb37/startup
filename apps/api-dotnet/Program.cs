@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -18,9 +19,6 @@ using System.Text.Json.Serialization.Metadata;
 using System.ComponentModel;
 using Microsoft.Extensions.Configuration;
 using DotNetEnv;
-
-
-// ----------------------------- Web app --------------------------------------
 
 public static partial class Program
 {
@@ -42,12 +40,9 @@ public static partial class Program
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
             p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
-        var storageRoot = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "storage"));
-
         var app = builder.Build();
         app.UseCors();
 
-        // POST /api/upload: accept multipart "file" (optional "instructions"), persist artifacts, return deck + PDF
         app.MapPost("/api/upload", async (HttpRequest req) =>
         {
             if (!req.HasFormContentType)
@@ -94,35 +89,44 @@ public static partial class Program
                     TypeInfoResolver = resolver
                 };
 
-                var artifacts = await PersistArtifactsAsync(ms, deck, jsonOptions, file.FileName, storageRoot);
+                var supabaseSettings = ReadSupabaseSettings(app.Configuration);
+                if (supabaseSettings is null)
+                {
+                    return Results.Problem(
+                        detail: "Supabase storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
+                        statusCode: 500
+                    );
+                }
 
-                if (!System.IO.File.Exists(artifacts.PdfPath))
-                    return Results.StatusCode(500);
+                var deckId = Guid.NewGuid();
 
-                var pdfBytes = await System.IO.File.ReadAllBytesAsync(artifacts.PdfPath);
+                var artifacts = await PersistArtifactsAsync(
+                    ms,
+                    deck,
+                    jsonOptions,
+                    file.FileName,
+                    deckId,
+                    supabaseSettings,
+                    req.HttpContext.RequestAborted);
+
                 var pdfInfo = new
                 {
-                    fileName = Path.GetFileName(artifacts.PdfPath),
-                    base64 = Convert.ToBase64String(pdfBytes)
+                    fileName = artifacts.PdfFileName,
+                    base64 = Convert.ToBase64String(artifacts.PdfBytes)
                 };
 
-                var supabaseSettings = ReadSupabaseSettings(app.Configuration);
-                if (supabaseSettings != null)
+                try
                 {
-                    try
-                    {
-                        await PersistDeckToSupabaseAsync(
-                            deck,
-                            instructions,
-                            artifacts,
-                            supabaseSettings,
-                            storageRoot,
-                            req.HttpContext.RequestAborted);
-                    }
-                    catch (Exception supabaseEx)
-                    {
-                        Console.Error.WriteLine($"Supabase persistence failed: {supabaseEx.Message}");
-                    }
+                    await PersistDeckToSupabaseAsync(
+                        deck,
+                        deckId,
+                        artifacts,
+                        supabaseSettings,
+                        req.HttpContext.RequestAborted);
+                }
+                catch (Exception supabaseEx)
+                {
+                    Console.Error.WriteLine($"Supabase persistence failed: {supabaseEx.Message}");
                 }
 
                 if (string.IsNullOrWhiteSpace(instructions))
@@ -253,7 +257,6 @@ public static partial class Program
             }
         });
 
-        // POST /api/render: accept multipart "file", return a PDF for inline viewing
         app.MapPost("/api/render", async (HttpRequest req) =>
         {
             if (!req.HasFormContentType)
@@ -276,12 +279,12 @@ public static partial class Program
                     await file.CopyToAsync(fs);
                 }
 
-                await ConvertPptxToPdfAsync(inPath, tmpDir); // produces outPdf
+                await ConvertPptxToPdfAsync(inPath, tmpDir);
 
-                if (!System.IO.File.Exists(outPdf))
+                if (!File.Exists(outPdf))
                     return Results.StatusCode(500);
 
-                var pdfBytes = await System.IO.File.ReadAllBytesAsync(outPdf);
+                var pdfBytes = await File.ReadAllBytesAsync(outPdf);
                 var cd = new System.Net.Mime.ContentDisposition
                 {
                     Inline = true,
@@ -300,14 +303,12 @@ public static partial class Program
                     detail: "PDF rendering requires LibreOffice (soffice) on the server (or set SOFFICE_PATH)."
                 );
             }
-
             catch (Exception ex)
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
             finally
             {
-                // Best-effort cleanup
                 try { Directory.Delete(tmpDir, recursive: true); } catch { /* ignore */ }
             }
         });
@@ -315,62 +316,126 @@ public static partial class Program
         await app.RunAsync();
     }
 
-    private static async Task<DeckArtifactPaths> PersistArtifactsAsync(Stream pptxStream, DeckDto deck, JsonSerializerOptions jsonOptions, string originalFileName, string storageRoot)
+    private static async Task<DeckArtifactUploadResult> PersistArtifactsAsync(
+        Stream pptxStream,
+        DeckDto deck,
+        JsonSerializerOptions jsonOptions,
+        string originalFileName,
+        Guid deckId,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
     {
         var baseName = SanitizeBaseName(originalFileName);
-        Directory.CreateDirectory(storageRoot);
+        var tempRoot = Path.Combine(Path.GetTempPath(), "dexter-artifacts", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(tempRoot);
 
-        var targetDir = Path.Combine(storageRoot, baseName);
-        Directory.CreateDirectory(targetDir);
+        var pptxPath = Path.Combine(tempRoot, $"{baseName}.pptx");
+        var jsonPath = Path.Combine(tempRoot, $"{baseName}.json");
+        var pdfPath = Path.Combine(tempRoot, $"{baseName}.pdf");
 
-        var pptxPath = Path.Combine(targetDir, $"{baseName}.pptx");
-        pptxStream.Position = 0;
-        await using (var fileStream = File.Create(pptxPath))
+        try
         {
-            await pptxStream.CopyToAsync(fileStream);
-        }
-
-        var jsonPath = Path.Combine(targetDir, $"{baseName}.json");
-        var deckJson = JsonSerializer.Serialize(deck, jsonOptions);
-        await File.WriteAllTextAsync(jsonPath, deckJson);
-
-        await ConvertPptxToPdfAsync(pptxPath, targetDir);
-
-        var expectedPdf = Path.Combine(targetDir, $"{baseName}.pdf");
-        if (!File.Exists(expectedPdf))
-        {
-            var generated = Directory.GetFiles(targetDir, "*.pdf").FirstOrDefault();
-            if (generated != null)
+            pptxStream.Position = 0;
+            await using (var fileStream = File.Create(pptxPath))
             {
-                if (File.Exists(expectedPdf))
-                {
-                    File.Delete(expectedPdf);
-                }
-                File.Move(generated, expectedPdf);
+                await pptxStream.CopyToAsync(fileStream, cancellationToken);
             }
+
+            await ConvertPptxToPdfAsync(pptxPath, tempRoot);
+
+            if (!File.Exists(pdfPath))
+            {
+                var generated = Directory.GetFiles(tempRoot, "*.pdf").FirstOrDefault();
+                if (generated != null)
+                {
+                    if (File.Exists(pdfPath))
+                    {
+                        File.Delete(pdfPath);
+                    }
+                    File.Move(generated, pdfPath);
+                }
+            }
+
+            if (!File.Exists(pdfPath))
+            {
+                throw new InvalidOperationException("PDF conversion failed (no output file).");
+            }
+
+            var pdfBytes = await File.ReadAllBytesAsync(pdfPath, cancellationToken);
+
+            var imageCaptions = await GenerateImageCaptionsAsync(
+                deck,
+                pptxPath,
+                deckId,
+                settings,
+                cancellationToken);
+
+            await GenerateTableSummariesAsync(
+                deck,
+                settings,
+                cancellationToken);
+
+            var deckJson = JsonSerializer.Serialize(deck, jsonOptions);
+            await File.WriteAllTextAsync(jsonPath, deckJson, cancellationToken);
+
+            var deckFolder = deckId.ToString("n");
+            var objectPrefix = string.IsNullOrWhiteSpace(settings.StoragePathPrefix)
+                ? deckFolder
+                : $"{settings.StoragePathPrefix.TrimEnd('/')}/{deckFolder}";
+
+            var pptxObjectPath = await UploadToSupabaseStorageAsync(
+                pptxPath,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                settings,
+                $"{objectPrefix}/{Path.GetFileName(pptxPath)}",
+                cancellationToken);
+
+            var jsonObjectPath = await UploadToSupabaseStorageAsync(
+                jsonPath,
+                "application/json",
+                settings,
+                $"{objectPrefix}/{Path.GetFileName(jsonPath)}",
+                cancellationToken);
+
+            var pdfObjectPath = await UploadToSupabaseStorageAsync(
+                pdfPath,
+                "application/pdf",
+                settings,
+                $"{objectPrefix}/{Path.GetFileName(pdfPath)}",
+                cancellationToken);
+
+            pptxStream.Position = 0;
+
+            return new DeckArtifactUploadResult(
+                BaseName: baseName,
+                PptxStoragePath: pptxObjectPath,
+                JsonStoragePath: jsonObjectPath,
+                PdfStoragePath: pdfObjectPath,
+                PdfFileName: Path.GetFileName(pdfPath),
+                PdfBytes: pdfBytes,
+                ImageCaptions: imageCaptions);
         }
-
-        pptxStream.Position = 0;
-
-        return new DeckArtifactPaths(
-            BaseName: baseName,
-            PptxPath: pptxPath,
-            JsonPath: jsonPath,
-            PdfPath: expectedPdf);
+        finally
+        {
+            try { Directory.Delete(tempRoot, recursive: true); } catch { /* ignore */ }
+        }
     }
 
     private static SupabaseSettings? ReadSupabaseSettings(IConfiguration configuration)
     {
         var url = configuration["SUPABASE_URL"] ?? Environment.GetEnvironmentVariable("SUPABASE_URL");
         var serviceKey = configuration["SUPABASE_SERVICE_ROLE_KEY"] ?? Environment.GetEnvironmentVariable("SUPABASE_SERVICE_ROLE_KEY");
+        var storageBucket = configuration["SUPABASE_STORAGE_BUCKET"] ?? Environment.GetEnvironmentVariable("SUPABASE_STORAGE_BUCKET");
 
-        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(serviceKey))
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(serviceKey) || string.IsNullOrWhiteSpace(storageBucket))
             return null;
 
         var decksTable = configuration["SUPABASE_DECKS_TABLE"] ?? Environment.GetEnvironmentVariable("SUPABASE_DECKS_TABLE") ?? "decks";
         var slidesTable = configuration["SUPABASE_SLIDES_TABLE"] ?? Environment.GetEnvironmentVariable("SUPABASE_SLIDES_TABLE") ?? "slides";
         var embeddingModel = configuration["OPENAI_EMBEDDING_MODEL"] ?? Environment.GetEnvironmentVariable("OPENAI_EMBEDDING_MODEL") ?? "text-embedding-3-small";
         var openAiKey = configuration["OPENAI_API_KEY"] ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var storagePrefix = configuration["SUPABASE_STORAGE_PREFIX"] ?? Environment.GetEnvironmentVariable("SUPABASE_STORAGE_PREFIX");
+        var visionModel = configuration["OPENAI_VISION_MODEL"] ?? Environment.GetEnvironmentVariable("OPENAI_VISION_MODEL") ?? "gpt-4o-mini";
 
         return new SupabaseSettings(
             Url: url.TrimEnd('/'),
@@ -378,32 +443,29 @@ public static partial class Program
             DecksTable: decksTable,
             SlidesTable: slidesTable,
             OpenAiKey: openAiKey,
-            EmbeddingModel: embeddingModel);
+            EmbeddingModel: embeddingModel,
+            StorageBucket: storageBucket,
+            StoragePathPrefix: storagePrefix ?? string.Empty,
+            VisionModel: visionModel);
     }
 
     private static async Task PersistDeckToSupabaseAsync(
         DeckDto deck,
-        string? instructions,
-        DeckArtifactPaths artifacts,
+        Guid deckId,
+        DeckArtifactUploadResult artifacts,
         SupabaseSettings settings,
-        string storageRoot,
         CancellationToken cancellationToken)
     {
-        var deckId = Guid.NewGuid();
         var now = DateTime.UtcNow;
-
-        var pptxRelative = ToRelativeStoragePath(storageRoot, artifacts.PptxPath);
-        var jsonRelative = ToRelativeStoragePath(storageRoot, artifacts.JsonPath);
-        var pdfRelative = ToRelativeStoragePath(storageRoot, artifacts.PdfPath);
 
         var deckRecord = new
         {
             id = deckId,
             deck_name = artifacts.BaseName,
             original_filename = deck.file,
-            pptx_path = pptxRelative,
-            json_path = jsonRelative,
-            pdf_path = pdfRelative,
+            pptx_path = artifacts.PptxStoragePath,
+            json_path = artifacts.JsonStoragePath,
+            pdf_path = artifacts.PdfStoragePath,
             slide_count = deck.slideCount,
             created_at = now,
             updated_at = now
@@ -415,11 +477,20 @@ public static partial class Program
         foreach (var slide in deck.slides)
         {
             var text = ExtractSlidePlainText(slide);
+            var captions = artifacts.ImageCaptions.TryGetValue(slide.index, out var captionList) ? captionList : null;
+            var tableSummaries = slide.elements
+                .OfType<TableDto>()
+                .Select(t => t.summary)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Cast<string>()
+                .ToList();
+
+            var combined = CombineSlideContent(text, captions, tableSummaries);
 
             float[]? embedding = null;
-            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(text))
+            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(combined))
             {
-                embedding = await TryGenerateEmbeddingAsync(text, settings.OpenAiKey!, settings.EmbeddingModel, cancellationToken);
+                embedding = await TryGenerateEmbeddingAsync(combined, settings.OpenAiKey!, settings.EmbeddingModel, cancellationToken);
             }
 
             slidePayload.Add(new
@@ -457,21 +528,488 @@ public static partial class Program
         }
     }
 
-    private static string ToRelativeStoragePath(string storageRoot, string fullPath)
+    private static async Task<string> UploadToSupabaseStorageAsync(
+        string localFilePath,
+        string contentType,
+        SupabaseSettings settings,
+        string objectPath,
+        CancellationToken cancellationToken)
     {
-        try
+        var normalizedPath = NormalizeStoragePath(objectPath);
+        var requestUri = $"{settings.Url}/storage/v1/object/{settings.StorageBucket}/{normalizedPath}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Add("x-upsert", "true");
+
+        var fileBytes = await File.ReadAllBytesAsync(localFilePath, cancellationToken);
+        request.Content = new ByteArrayContent(fileBytes);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
         {
-            var relative = Path.GetRelativePath(storageRoot, fullPath);
-            if (string.IsNullOrWhiteSpace(relative) || relative.StartsWith(".."))
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase storage upload failed ({(int)response.StatusCode}): {body}");
+        }
+
+        return normalizedPath;
+    }
+
+    private static string NormalizeStoragePath(string path)
+    {
+        return path.Trim('/');
+    }
+
+    private static async Task<Dictionary<int, List<string>>> GenerateImageCaptionsAsync(
+        DeckDto deck,
+        string pptxPath,
+        Guid deckId,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var captionsBySlide = new Dictionary<int, List<string>>();
+
+        if (string.IsNullOrWhiteSpace(settings.OpenAiKey))
+            return captionsBySlide;
+
+        using var archive = ZipFile.OpenRead(pptxPath);
+        var captionCache = new Dictionary<string, string>();
+
+        foreach (var slide in deck.slides)
+        {
+            foreach (var picture in slide.elements.OfType<PictureDto>())
             {
-                relative = Path.GetFileName(fullPath);
+                if (string.IsNullOrWhiteSpace(picture.imgPath))
+                    continue;
+
+                var entryPath = picture.imgPath.TrimStart('/');
+                if (captionCache.TryGetValue(entryPath, out var cached))
+                {
+                    picture.summary = cached;
+                    AppendCaption(captionsBySlide, slide.index, cached);
+                    continue;
+                }
+
+                var entry = archive.GetEntry(entryPath);
+                if (entry is null)
+                    continue;
+
+                await using var entryStream = entry.Open();
+                using var ms = new MemoryStream();
+                await entryStream.CopyToAsync(ms, cancellationToken);
+                var imageBytes = ms.ToArray();
+
+                var contentType = GetMimeTypeForExtension(Path.GetExtension(entryPath));
+
+                var caption = await RequestImageCaptionAsync(imageBytes, contentType, settings, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(caption))
+                {
+                    caption = caption.Trim();
+                    picture.summary = caption;
+                    captionCache[entryPath] = caption;
+                    AppendCaption(captionsBySlide, slide.index, caption);
+                }
+            }
+        }
+
+        return captionsBySlide;
+    }
+
+    private static void AppendCaption(Dictionary<int, List<string>> captionsBySlide, int slideIndex, string caption)
+    {
+        if (!captionsBySlide.TryGetValue(slideIndex, out var list))
+        {
+            list = new List<string>();
+            captionsBySlide[slideIndex] = list;
+        }
+        list.Add(caption);
+    }
+
+    private static async Task GenerateTableSummariesAsync(
+        DeckDto deck,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(settings.OpenAiKey))
+            return;
+
+        foreach (var table in deck.slides.SelectMany(s => s.elements).OfType<TableDto>())
+        {
+            var tableText = FormatTableForSummary(table);
+            if (string.IsNullOrWhiteSpace(tableText))
+                continue;
+
+            var summary = await RequestTableSummaryAsync(tableText, settings, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                table.summary = summary.Trim();
+            }
+        }
+    }
+
+    private static string FormatTableForSummary(TableDto table)
+    {
+        if (table.cells is null || table.cells.Length == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(table.name))
+        {
+            sb.Append("Table ").Append(table.name.Trim()).AppendLine();
+        }
+
+        var headers = new string[table.cols];
+        var hasHeaders = false;
+        if (table.rows > 0)
+        {
+            var headerRow = table.cells[0];
+            if (headerRow != null)
+            {
+                for (int c = 0; c < Math.Min(table.cols, headerRow.Length); c++)
+                {
+                    var cell = headerRow[c];
+                    if (cell is null) continue;
+                    var text = ExtractTableCellText(cell);
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        headers[c] = text.Trim();
+                        hasHeaders = true;
+                    }
+                }
+            }
+        }
+
+        for (int r = 0; r < Math.Min(table.rows, table.cells.Length); r++)
+        {
+            var row = table.cells[r];
+            if (row is null) continue;
+
+            var values = new List<string>();
+            for (int c = 0; c < Math.Min(table.cols, row.Length); c++)
+            {
+                var cell = row[c];
+                if (cell is null) continue;
+                var text = ExtractTableCellText(cell);
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                var label = headers[c];
+                if (string.IsNullOrWhiteSpace(label))
+                {
+                    label = $"Column {c + 1}";
+                }
+
+                if (cell.rowSpan > 1 || cell.colSpan > 1)
+                {
+                    label += $" (spans {cell.rowSpan}x{cell.colSpan})";
+                }
+
+                values.Add($"{label}: {text.Trim()}");
             }
 
-            return relative.Replace(Path.DirectorySeparatorChar, '/');
+            if (values.Count > 0)
+            {
+                var rowLabel = hasHeaders && r == 0 ? "Header" : $"Row {r + 1}";
+                sb.Append(rowLabel).Append(": ").Append(string.Join("; ", values)).AppendLine();
+            }
+        }
+
+        var result = sb.ToString().Trim();
+        if (result.Length > 8000)
+        {
+            result = result.Substring(0, 8000);
+        }
+
+        return result;
+    }
+
+    private static string ExtractTableCellText(TableCellDto cell)
+    {
+        if (cell.paragraphs is null || cell.paragraphs.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var paragraph in cell.paragraphs)
+        {
+            if (string.IsNullOrWhiteSpace(paragraph.text))
+                continue;
+            if (sb.Length > 0)
+                sb.Append(' ');
+            sb.Append(paragraph.text.Trim());
+        }
+
+        return sb.ToString();
+    }
+
+    private static async Task<string?> RequestImageCaptionAsync(byte[] imageBytes, string contentType, SupabaseSettings settings, CancellationToken cancellationToken)
+    {
+        if (imageBytes.Length == 0)
+            return null;
+
+        if (string.IsNullOrWhiteSpace(settings.OpenAiKey))
+            return null;
+
+        var model = settings.VisionModel;
+        if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(settings.OpenAiKey))
+            return null;
+
+        var base64 = Convert.ToBase64String(imageBytes);
+        var imageUrl = $"data:{contentType};base64,{base64}";
+
+        var payload = new
+        {
+            model,
+            input = new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = "Describe this slide image succinctly for semantic search. Avoid speculation." },
+                        new { type = "input_image", image_url = imageUrl }
+                    }
+                }
+            }
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.OpenAiKey);
+        request.Headers.Add("OpenAI-Beta", "assistants=v2");
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+            Console.Error.WriteLine($"Vision caption request failed ({(int)response.StatusCode}): {error}");
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (doc.RootElement.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
+        {
+            return outputText.GetString();
+        }
+
+        if (doc.RootElement.TryGetProperty("output", out var outputEl) && outputEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in outputEl.EnumerateArray())
+            {
+                if (item.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var contentItem in contentEl.EnumerateArray())
+                    {
+                        if (contentItem.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String)
+                        {
+                            return textEl.GetString();
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetMimeTypeForExtension(string? extension)
+    {
+        return extension?.ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".tif" or ".tiff" => "image/tiff",
+            _ => "image/png"
+        };
+    }
+
+    private static async Task<string?> RequestTableSummaryAsync(string tableText, SupabaseSettings settings, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(tableText))
+            return null;
+
+        var model = settings.VisionModel;
+        if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(settings.OpenAiKey))
+            return null;
+
+        var prompt = "Summarize the following slide table in one or two sentences focusing on the key comparisons or insights. Avoid speculation.";
+        if (tableText.Length > 6000)
+        {
+            tableText = tableText.Substring(0, 6000);
+        }
+
+        var payload = new
+        {
+            model,
+            input = new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "input_text", text = $"{prompt}\n\n{tableText}" }
+                    }
+                }
+            }
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.OpenAiKey);
+        request.Headers.Add("OpenAI-Beta", "assistants=v2");
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+            Console.Error.WriteLine($"Table summary request failed ({(int)response.StatusCode}): {error}");
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (doc.RootElement.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
+        {
+            return outputText.GetString();
+        }
+
+        if (doc.RootElement.TryGetProperty("output", out var outputEl) && outputEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in outputEl.EnumerateArray())
+            {
+                if (item.TryGetProperty("content", out var contentEl) && contentEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var contentItem in contentEl.EnumerateArray())
+                    {
+                        if (contentItem.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String)
+                        {
+                            return textEl.GetString();
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string CombineSlideContent(
+        string text,
+        IReadOnlyList<string>? captions,
+        IReadOnlyList<string>? tableSummaries)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            sb.AppendLine(text.Trim());
+        }
+
+        if (captions != null)
+        {
+            foreach (var caption in captions)
+            {
+                if (string.IsNullOrWhiteSpace(caption))
+                    continue;
+                if (sb.Length > 0)
+                    sb.AppendLine();
+                sb.Append("Image summary: ").Append(caption.Trim());
+            }
+        }
+
+        if (tableSummaries != null)
+        {
+            foreach (var summary in tableSummaries)
+            {
+                if (string.IsNullOrWhiteSpace(summary))
+                    continue;
+                if (sb.Length > 0)
+                    sb.AppendLine();
+                sb.Append("Table summary: ").Append(summary.Trim());
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static string SanitizeBaseName(string originalFileName)
+    {
+        var baseName = Path.GetFileNameWithoutExtension(originalFileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+            return "deck";
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(baseName.Length);
+        foreach (var ch in baseName)
+        {
+            if (invalidChars.Contains(ch) || char.IsWhiteSpace(ch))
+            {
+                builder.Append('_');
+            }
+            else
+            {
+                builder.Append(ch);
+            }
+        }
+
+        var sanitized = builder.ToString().Trim('_');
+        return string.IsNullOrWhiteSpace(sanitized) ? "deck" : sanitized;
+    }
+
+    private static async Task ConvertPptxToPdfAsync(string inputPath, string outDir)
+    {
+        var soffice = Environment.GetEnvironmentVariable("SOFFICE_PATH") ?? "soffice";
+
+        var profileDir = Path.Combine(Path.GetTempPath(), "libreoffice-profile", Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(profileDir);
+        var profileUri = new Uri(profileDir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+            ? profileDir
+            : profileDir + Path.DirectorySeparatorChar).AbsoluteUri;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = soffice,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        psi.ArgumentList.Add("--headless");
+        psi.ArgumentList.Add("--nologo");
+        psi.ArgumentList.Add("--nofirststartwizard");
+        psi.ArgumentList.Add("--norestore");
+        psi.ArgumentList.Add($"-env:UserInstallation={profileUri}");
+        psi.ArgumentList.Add("--convert-to");
+        psi.ArgumentList.Add("pdf");
+        psi.ArgumentList.Add("--outdir");
+        psi.ArgumentList.Add(outDir);
+        psi.ArgumentList.Add(inputPath);
+
+        using var proc = Process.Start(psi)!;
+        var stdOut = await proc.StandardOutput.ReadToEndAsync();
+        var stdErr = await proc.StandardError.ReadToEndAsync();
+        await proc.WaitForExitAsync();
+
+        try
+        {
+            Directory.Delete(profileDir, recursive: true);
         }
         catch
         {
-            return fullPath.Replace(Path.DirectorySeparatorChar, '/');
+            // best effort cleanup
+        }
+
+        if (proc.ExitCode != 0)
+        {
+            throw new Exception($"LibreOffice conversion failed (code {proc.ExitCode}). stderr: {stdErr}. stdout: {stdOut}");
         }
     }
 
@@ -535,7 +1073,6 @@ public static partial class Program
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            // Swallow embedding failures but log for observability.
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             Console.Error.WriteLine($"Embedding request failed ({(int)response.StatusCode}): {body}");
             return null;
@@ -547,9 +1084,25 @@ public static partial class Program
         return vector?.ToArray();
     }
 
-    private sealed record DeckArtifactPaths(string BaseName, string PptxPath, string JsonPath, string PdfPath);
+    private sealed record DeckArtifactUploadResult(
+        string BaseName,
+        string PptxStoragePath,
+        string JsonStoragePath,
+        string PdfStoragePath,
+        string PdfFileName,
+        byte[] PdfBytes,
+        Dictionary<int, List<string>> ImageCaptions);
 
-    private sealed record SupabaseSettings(string Url, string ServiceKey, string DecksTable, string SlidesTable, string? OpenAiKey, string EmbeddingModel);
+    private sealed record SupabaseSettings(
+        string Url,
+        string ServiceKey,
+        string DecksTable,
+        string SlidesTable,
+        string? OpenAiKey,
+        string EmbeddingModel,
+        string StorageBucket,
+        string StoragePathPrefix,
+        string VisionModel);
 
     private sealed class OpenAiEmbeddingResponse
     {
@@ -561,82 +1114,5 @@ public static partial class Program
     {
         [JsonPropertyName("embedding")]
         public List<float> Embedding { get; set; } = new();
-    }
-
-    private static string SanitizeBaseName(string originalFileName)
-    {
-        var baseName = Path.GetFileNameWithoutExtension(originalFileName);
-        if (string.IsNullOrWhiteSpace(baseName))
-            return "deck";
-
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var builder = new StringBuilder(baseName.Length);
-        foreach (var ch in baseName)
-        {
-            if (invalidChars.Contains(ch) || char.IsWhiteSpace(ch))
-            {
-                builder.Append('_');
-            }
-            else
-            {
-                builder.Append(ch);
-            }
-        }
-
-        var sanitized = builder.ToString().Trim('_');
-        return string.IsNullOrWhiteSpace(sanitized) ? "deck" : sanitized;
-    }
-
-    // --------------------------- LibreOffice conversion ----------------------
-
-    private static async Task ConvertPptxToPdfAsync(string inputPath, string outDir)
-    {
-        // Use SOFFICE_PATH env var if you want a fixed path; else rely on PATH
-        var soffice = Environment.GetEnvironmentVariable("SOFFICE_PATH") ?? "soffice";
-
-        var profileDir = Path.Combine(Path.GetTempPath(), "libreoffice-profile", Guid.NewGuid().ToString("n"));
-        Directory.CreateDirectory(profileDir);
-        var profileUri = new Uri(profileDir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
-            ? profileDir
-            : profileDir + Path.DirectorySeparatorChar).AbsoluteUri;
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = soffice,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        // soffice --headless --convert-to pdf --outdir <outDir> <inputPath>
-        psi.ArgumentList.Add("--headless");
-        psi.ArgumentList.Add("--nologo");
-        psi.ArgumentList.Add("--nofirststartwizard");
-        psi.ArgumentList.Add("--norestore");
-        psi.ArgumentList.Add($"-env:UserInstallation={profileUri}");
-        psi.ArgumentList.Add("--convert-to");
-        psi.ArgumentList.Add("pdf");
-        psi.ArgumentList.Add("--outdir");
-        psi.ArgumentList.Add(outDir);
-        psi.ArgumentList.Add(inputPath);
-
-        using var proc = Process.Start(psi)!;
-        var stdOut = await proc.StandardOutput.ReadToEndAsync();
-        var stdErr = await proc.StandardError.ReadToEndAsync();
-        await proc.WaitForExitAsync();
-
-        try
-        {
-            Directory.Delete(profileDir, recursive: true);
-        }
-        catch
-        {
-            // best effort cleanup
-        }
-
-        if (proc.ExitCode != 0)
-        {
-            throw new Exception($"LibreOffice conversion failed (code {proc.ExitCode}). stderr: {stdErr}. stdout: {stdOut}");
-        }
     }
 }
