@@ -55,6 +55,26 @@ type Slide = { index: number; elements: Element[] };
 type Deck = { file: string; slideCount: number; slides: Slide[] };
 type ExtractResponse = Deck | { error: string };
 
+type DeckPreview = {
+  id: string;
+  title: string;
+  description?: string;
+  thumbnailUrl?: string;
+  coverThumbnailUrl?: string;
+  pdfUrl?: string;
+  pdfPath?: string;
+  updatedAt?: string;
+};
+
+type SlideReference = {
+  slideId?: string;
+  deckId?: string;
+  deckName?: string;
+  slideNumber?: number;
+  similarity?: number;
+  thumbnailUrl?: string;
+};
+
 type RenderResult = {
   pdfUrl: string;
   doc: PDFDocumentProxy;
@@ -66,6 +86,9 @@ type BuilderSeed = {
   instructions: string;
   fileName?: string;
 };
+
+const STORAGE_PUBLIC_BASE = (import.meta.env?.VITE_STORAGE_PUBLIC_BASE ?? "").trim();
+const SLIDE_IMAGE_BASE = (import.meta.env?.VITE_DECK_API_BASE ?? "").trim();
 
 /* ------------------------------ App ------------------------------ */
 
@@ -252,31 +275,247 @@ function PlusIcon() {
   );
 }
 
-type ChatMsg = { id: string; role: "user" | "assistant"; content: string };
+function SearchIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="16.65" y1="16.65" x2="21" y2="21" />
+    </svg>
+  );
+}
+
+function toPublicUrl(path?: string) {
+  if (!path || typeof path !== "string") return undefined;
+  if (/^https?:\/\//i.test(path) || path.startsWith("data:")) return path;
+  if (!STORAGE_PUBLIC_BASE) return undefined;
+
+  let base = STORAGE_PUBLIC_BASE;
+  while (base.endsWith("/")) {
+    base = base.slice(0, -1);
+  }
+
+  let clean = path;
+  while (clean.startsWith("/")) {
+    clean = clean.slice(1);
+  }
+
+  if (!base) return undefined;
+
+  return `${base}/${clean}`;
+}
+
+function buildSlideImageUrl(deckId?: string, slideNumber?: number, provided?: string) {
+  if (provided && provided.startsWith("data:")) return provided;
+  if (provided && /^https?:\/\//i.test(provided)) return provided;
+  if (!deckId || !slideNumber) return provided;
+
+  const base = SLIDE_IMAGE_BASE || "";
+  const origin = base ? base.replace(/\/$/, "") : "";
+  return `${origin}/api/decks/${deckId}/slides/${slideNumber}`;
+}
+
+const FALLBACK_DECKS: DeckPreview[] = [
+  {
+    id: "fallback-onboarding",
+    title: "Onboarding overview",
+    description: "Sample deck to show the home layout.",
+    thumbnailUrl: "https://placehold.co/640x360/4c51bf/ffffff?text=Dexter",
+    coverThumbnailUrl: "https://placehold.co/640x360/4c51bf/ffffff?text=Dexter",
+  },
+  {
+    id: "fallback-security",
+    title: "Security briefing",
+    description: "Placeholder deck - connect Supabase to replace it.",
+    thumbnailUrl: "https://placehold.co/640x360/2563eb/ffffff?text=Deck",
+    coverThumbnailUrl: "https://placehold.co/640x360/2563eb/ffffff?text=Deck",
+  },
+  {
+    id: "fallback-metrics",
+    title: "Q4 metrics recap",
+    description: "Upload a deck to see the real preview here.",
+    thumbnailUrl: "https://placehold.co/640x360/1e293b/ffffff?text=Slide",
+    coverThumbnailUrl: "https://placehold.co/640x360/1e293b/ffffff?text=Slide",
+  },
+];
+
+function formatRelativeDate(iso?: string) {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const now = new Date();
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (parsed.getFullYear() !== now.getFullYear()) {
+    opts.year = "numeric";
+  }
+  return parsed.toLocaleDateString(undefined, opts);
+}
+
+function normalizeDeckRecord(raw: any): DeckPreview | null {
+  if (!raw || typeof raw !== "object") return null;
+  const id = raw.id ?? raw.deckId ?? raw.deck_id ?? raw.uuid ?? raw.slug;
+  const title = raw.deck_name ?? raw.deckName ?? raw.title ?? raw.name ?? raw.original_filename;
+  const pdfCandidate = raw.pdfUrl ?? raw.pdf_url ?? raw.pdf ?? raw.pdfPath ?? raw.pdf_path;
+  const thumbnailCandidate =
+    raw.cover_thumbnail_url ??
+    raw.coverThumbnailUrl ??
+    raw.thumbnailUrl ??
+    raw.thumbnail_url ??
+    raw.preview_url ??
+    raw.cover_image ??
+    raw.cover;
+  const description = raw.description ?? raw.summary ?? raw.notes ?? undefined;
+  const updated = raw.updatedAt ?? raw.updated_at ?? raw.modified_at ?? raw.modifiedAt ?? raw.created_at ?? raw.createdAt;
+
+  const pdfUrl = typeof pdfCandidate === "string"
+    ? toPublicUrl(pdfCandidate) ?? (pdfCandidate.startsWith("data:") ? pdfCandidate : undefined)
+    : undefined;
+
+  const thumbnailUrl = buildSlideImageUrl(id ? String(id) : undefined, 1, typeof thumbnailCandidate === "string" ? thumbnailCandidate : undefined);
+
+  const safeTitle = typeof title === "string" && title.trim().length > 0 ? title : "Untitled deck";
+  const safeId = id
+    ? String(id)
+    : typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+
+  return {
+    id: safeId,
+    title: safeTitle,
+    description: typeof description === "string" && description.trim().length > 0 ? description : undefined,
+    pdfUrl,
+    pdfPath: typeof pdfCandidate === "string" ? pdfCandidate : undefined,
+    thumbnailUrl,
+    coverThumbnailUrl: thumbnailUrl,
+    updatedAt: typeof updated === "string" ? updated : undefined,
+  };
+}
+
+function normalizeSlideReference(raw: any): SlideReference | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const slideId = typeof raw.slideId === "string" ? raw.slideId : typeof raw.id === "string" ? raw.id : undefined;
+  const deckIdRaw = raw.deckId ?? raw.deck_id ?? raw.deckID ?? raw.deck;
+  const deckId = typeof deckIdRaw === "string" ? deckIdRaw : undefined;
+  const deckName = typeof raw.deckName === "string" ? raw.deckName : undefined;
+
+  let slideNumber: number | undefined;
+  const slideRaw = raw.slideNumber ?? raw.slide_no ?? raw.slide ?? raw.number;
+  if (typeof slideRaw === "number" && Number.isFinite(slideRaw)) {
+    slideNumber = slideRaw;
+  } else if (typeof slideRaw === "string") {
+    const parsed = parseInt(slideRaw, 10);
+    if (!Number.isNaN(parsed)) slideNumber = parsed;
+  }
+
+  const similarity = typeof raw.similarity === "number" ? raw.similarity : undefined;
+  const providedThumb = typeof raw.thumbnailUrl === "string"
+    ? raw.thumbnailUrl
+    : typeof raw.thumbnail_url === "string"
+      ? raw.thumbnail_url
+      : undefined;
+
+  const thumbnailUrl = buildSlideImageUrl(deckId, slideNumber, providedThumb ?? undefined);
+  console.log("normalizeSlideReference", {
+    slideId,
+    deckId,
+    deckName,
+    slideNumber,
+    similarity,
+    providedThumb,
+    thumbnailUrl,
+  });
+
+  return {
+    slideId,
+    deckId,
+    deckName,
+    slideNumber,
+    similarity,
+    thumbnailUrl,
+  };
+}
+
+function normalizeSlideReferences(raw: any): SlideReference[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list: SlideReference[] = [];
+  for (const item of raw) {
+    const normalized = normalizeSlideReference(item);
+    if (normalized) list.push(normalized);
+  }
+  return list.length > 0 ? list : undefined;
+}
+
+type ChatMsg = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources?: SlideReference[];
+};
+
+type HomeMode = "landing" | "chat";
 
 function HomeView() {
+  const [mode, setMode] = useState<HomeMode>("landing");
   const [query, setQuery] = useState("");
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    { id: crypto.randomUUID(), role: "assistant", content: "Ask me about your slides or data." },
-  ]);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [sending, setSending] = useState(false);
+  const [decks, setDecks] = useState<DeckPreview[]>([]);
+  const [loadingDecks, setLoadingDecks] = useState(true);
+  const [usedFallback, setUsedFallback] = useState(false);
 
-  // Left rail list (unchanged demo data)
-  const [chatItems, setChatItems] = useState<ChatItem[]>([
-    { title: "Onboarding decks", time: "Yesterday" },
-    { title: "Security briefing", time: "2 days ago" },
-    { title: "Q4 metrics", time: "Last week" },
-  ]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDecks() {
+      setLoadingDecks(true);
+      try {
+        const res = await fetch("/api/decks?limit=3");
+        if (!res.ok) {
+          throw new Error(`deck request failed: ${res.status}`);
+        }
+        const payload = await res.json();
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.decks)
+            ? payload.decks
+            : [];
+        const normalized = list
+          .map((item: any) => normalizeDeckRecord(item))
+          .filter(Boolean) as DeckPreview[];
+
+        if (!cancelled) {
+          setDecks(normalized);
+          setUsedFallback(false);
+        }
+      } catch (err) {
+        console.error("Failed to load decks", err);
+        if (!cancelled) {
+          setDecks(FALLBACK_DECKS);
+          setUsedFallback(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingDecks(false);
+        }
+      }
+    }
+
+    loadDecks();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = query.trim();
     if (!text || sending) return;
 
-    // optimistic user bubble
     const userMsg: ChatMsg = { id: crypto.randomUUID(), role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setQuery("");
+    setMode("chat");
     setSending(true);
 
     try {
@@ -286,12 +525,16 @@ function HomeView() {
         body: JSON.stringify({ message: text }),
       });
       const data = await res.json();
+      console.debug("/api/chat response", data);
       const reply = typeof data?.reply === "string" ? data.reply : "Sorry, something went wrong.";
+      const sources = normalizeSlideReferences(data?.sources);
+      console.debug("normalized slide sources", sources);
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: reply },
+        { id: crypto.randomUUID(), role: "assistant", content: reply, sources },
       ]);
-    } catch {
+    } catch (err) {
+      console.error("Chat request failed", err);
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", content: "Network error. Try again." },
@@ -301,193 +544,302 @@ function HomeView() {
     }
   }
 
-  return (
-    <div style={{ height: "100%", display: "grid", gridTemplateColumns: "200px 1fr", minHeight: 0 }}>
-      {/* Left rail (Recent) */}
-      <aside
-        style={{
-          borderRight: "1px solid #e5e7eb",
-          background: "#f8fafc",
-          padding: "24px 20px",
-          overflow: "auto",
-          color: "#1f2937",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() =>
-            setMessages([{ id: crypto.randomUUID(), role: "assistant", content: "New chat started." }])
-          }
-          style={{
-            width: "100%",
-            padding: "12px 14px",
-            borderRadius: 10,
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
-            color: "#1f2937",
-            fontSize: 14,
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            justifyContent: "center",
-            cursor: "pointer",
-            marginBottom: 20,
-            boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
-          }}
-        >
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 22,
-              height: 22,
-              borderRadius: "50%",
-              background: "#2563eb",
-              color: "#fff",
-              fontSize: 16,
-              lineHeight: 1,
-            }}
-          >
-            +
-          </span>
-          New chat
-        </button>
+  if (mode === "landing") {
+    const decksToRender = decks.slice(0, 3);
 
-        <h2 style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: 0.8, margin: "0 0 12px", color: "#6b7280" }}>
-          Recent
-        </h2>
-        <div style={{ display: "grid", gap: 6 }}>
-          {chatItems.map((item, idx) => (
-            <button
-              key={idx}
-              type="button"
-              style={{
-                textAlign: "left",
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid transparent",
-                background: "transparent",
-                color: "#1f2937",
-                fontSize: 13,
-                lineHeight: 1.4,
-                cursor: "pointer",
-                transition: "background 0.15s ease, border 0.15s ease",
-              }}
-            >
-              <div style={{ fontWeight: 500 }}>{item.title}</div>
-              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>{item.time}</div>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {/* Center: messages + composer (ChatGPT-like) */}
-      <main style={{ display: "grid", gridTemplateRows: "1fr auto", minHeight: 0, padding: "0 24px", background: "#fff"}}>
-        {/* Message list */}
+    return (
+      <div style={{ height: "100%", overflowY: "auto", background: "#f3f4f6" }}>
         <div
           style={{
-            overflow: "auto",
-            padding: "24px 0",
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
+            maxWidth: 900,
+            margin: "0 auto",
+            padding: "72px 24px 80px",
+            display: "grid",
+            gap: 48,
+            textAlign: "center",
           }}
         >
-          {messages.map((m) =>
-            m.role === "assistant" ? (
-              <AssistantBlock key={m.id} text={m.content} />
-            ) : (
-              <UserBubble key={m.id} text={m.content} />
-            )
-          )}
+          <div style={{ display: "grid", gap: 12 }}>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "clamp(48px, 10vw, 96px)",
+                fontWeight: 700,
+                letterSpacing: -1.5,
+                color: "#0f172a",
+              }}
+            >
+              Dexter
+            </h1>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "clamp(18px, 3vw, 24px)",
+                color: "#475569",
+              }}
+            >
+              All your information in one place.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} style={{ width: "100%" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 16,
+                background: "#ffffff",
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                padding: "16px 22px",
+                boxShadow: "0 24px 48px rgba(15,23,42,0.12)",
+              }}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32 }}>
+                <SearchIcon />
+              </span>
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Ask Dexter anything about your decks"
+                style={{
+                  flex: 1,
+                  border: "none",
+                  outline: "none",
+                  fontSize: 18,
+                  color: "#111827",
+                  background: "transparent",
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!query.trim() || sending}
+                style={{
+                  background: "#111827",
+                  color: "#fff",
+                  border: 0,
+                  borderRadius: 999,
+                  padding: "10px 20px",
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: query.trim() && !sending ? "pointer" : "not-allowed",
+                  opacity: query.trim() && !sending ? 1 : 0.6,
+                }}
+              >
+                {sending ? "Searching..." : "Search"}
+              </button>
+            </div>
+          </form>
+
+          <section style={{ display: "grid", gap: 18, textAlign: "left" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <h2 style={{ margin: 0, fontSize: 20, color: "#0f172a" }}>Recent decks</h2>
+              {usedFallback ? (
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>Sample decks shown</span>
+              ) : decksToRender.length > 0 ? (
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>
+                  {decksToRender.length} {decksToRender.length === 1 ? "deck" : "decks"}
+                </span>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gap: 18,
+                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              }}
+            >
+              {loadingDecks ? (
+                Array.from({ length: 3 }).map((_, idx) => <DeckThumbnailSkeleton key={idx} />)
+              ) : decksToRender.length > 0 ? (
+                decksToRender.map((deck) => <DeckThumbnailCard key={deck.id} deck={deck} />)
+              ) : (
+                <div
+                  style={{
+                    border: "1px dashed #d1d5db",
+                    borderRadius: 16,
+                    padding: "28px",
+                    color: "#6b7280",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  Upload a slide deck to see it here.
+                </div>
+              )}
+            </div>
+          </section>
         </div>
+      </div>
+    );
+  }
 
+  return (
+    <div
+      style={{
+        height: "100%",
+        display: "grid",
+        gridTemplateRows: "1fr auto",
+        background: "#f3f4f6",
+      }}
+    >
+      <div
+        style={{
+          overflowY: "auto",
+          padding: "40px 24px 32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 18,
+        }}
+      >
+        {messages.map((message) => (
+          <ChatMessage key={message.id} message={message} />
+        ))}
+        {sending && <AssistantTypingIndicator />}
+      </div>
 
-        {/* Composer */}
-        <form onSubmit={handleSubmit} style={{ position: "sticky", bottom: 0, background: "transparent", padding: "16px 0" }}>
-          <div
+      <form onSubmit={handleSubmit} style={{ padding: "16px 24px", background: "#ffffff", borderTop: "1px solid #e5e7eb" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            background: "#f8fafc",
+            borderRadius: 999,
+            border: "1px solid #d1d5db",
+            padding: "14px 18px",
+            boxShadow: "0 18px 36px rgba(15,23,42,0.08)",
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28 }}>
+            <SearchIcon />
+          </span>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Ask anything"
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              background: "#fff",
+              flex: 1,
+              border: "none",
+              outline: "none",
+              fontSize: 16,
+              background: "transparent",
+              color: "#111827",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!query.trim() || sending}
+            style={{
+              background: "#111827",
+              color: "#fff",
+              border: 0,
               borderRadius: 999,
-              border: "1px solid #d1d5db",
-              padding: "14px 18px",
-              boxShadow: "0 12px 24px rgba(15,23,42,0.08)",
-              maxWidth: 780,
-              margin: "0 auto",
+              padding: "10px 20px",
+              fontWeight: 600,
+              cursor: query.trim() && !sending ? "pointer" : "not-allowed",
+              opacity: query.trim() && !sending ? 1 : 0.6,
             }}
           >
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                background: "#e5e7eb",
-                fontWeight: 600,
-                color: "#111827",
-              }}
-            >
-              Q
-            </span>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="What do you want to know?"
-              style={{
-                flex: 1,
-                border: "none",
-                outline: "none",
-                fontSize: 16,
-                color: "#111827",
-                background: "transparent",
-              }}
-            />
-            <button
-              type="submit"
-              disabled={!query.trim() || sending}
-              style={{
-                background: "#111827",
-                color: "#fff",
-                border: 0,
-                borderRadius: 999,
-                padding: "8px 14px",
-                fontWeight: 600,
-                cursor: query.trim() && !sending ? "pointer" : "not-allowed",
-                opacity: query.trim() && !sending ? 1 : 0.6,
-              }}
-            >
-              Send
-            </button>
-          </div>
-        </form>
-      </main>
+            Send
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
 
-function UserBubble({ text }: { text: string }) {
+function ChatMessage({ message }: { message: ChatMsg }) {
+  if (message.role === "assistant") {
+    return <AssistantMessage text={message.content} sources={message.sources} />;
+  }
+  return <UserMessage text={message.content} />;
+}
+
+function AssistantMessage({ text, sources }: { text: string; sources?: SlideReference[] }) {
   return (
-    <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 8px" }}>
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       <div
         style={{
-          display: "inline-block",
-          maxWidth: "min(680px, 70vw)",
-          background: "#f3f4f6",            // light gray
+          width: 36,
+          height: 36,
+          borderRadius: "50%",
+          background: "#111827",
+          color: "#fff",
+          display: "grid",
+          placeItems: "center",
+          fontWeight: 600,
+        }}
+      >
+        D
+      </div>
+      <div style={{ display: "grid", gap: 12, maxWidth: "min(720px, 80%)" }}>
+        <div
+          style={{
+            color: "#0f172a",
+            lineHeight: 1.65,
+            whiteSpace: "pre-wrap",
+            fontSize: 16,
+          }}
+        >
+          {text}
+        </div>
+        {sources && sources.length > 0 && <SlideReferenceList references={sources} />}
+      </div>
+    </div>
+  );
+}
+
+function AssistantTypingIndicator() {
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: "50%",
+          background: "#111827",
+          color: "#fff",
+          display: "grid",
+          placeItems: "center",
+          fontWeight: 600,
+        }}
+      >
+        D
+      </div>
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          color: "#6b7280",
+          fontSize: 16,
+          fontStyle: "italic",
+        }}
+      >
+        Thinking...
+      </div>
+    </div>
+  );
+}
+
+function UserMessage({ text }: { text: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div
+        style={{
+          background: "#e5e7eb",
           color: "#111827",
-          border: "1px solid #e5e7eb",
-          padding: "10px 14px",
-          borderRadius: "16px 16px 4px 16px",
-          lineHeight: 1.45,
+          borderRadius: 18,
+          borderBottomRightRadius: 4,
+          padding: "12px 16px",
+          maxWidth: "min(620px, 80%)",
+          lineHeight: 1.6,
           whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
+          border: "1px solid #d1d5db",
         }}
       >
         {text}
@@ -496,28 +848,186 @@ function UserBubble({ text }: { text: string }) {
   );
 }
 
-function AssistantBlock({ text }: { text: string }) {
+function SlideReferenceList({ references }: { references: SlideReference[] }) {
+  if (references.length === 0) return null;
+
+  const [primary, ...rest] = references;
+
   return (
-    <div style={{ padding: "0 8px" }}>
+    <div style={{ display: "grid", gap: 18 }}>
+      <SlideReferenceCard reference={primary} large key={`primary-${primary.slideId ?? primary.deckId ?? 0}`} />
+      {rest.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gap: 16,
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          }}
+        >
+          {rest.map((ref, idx) => (
+            <SlideReferenceCard
+              reference={ref}
+              key={ref.slideId ?? `${ref.deckId ?? "deck"}-${ref.slideNumber ?? idx}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SlideReferenceCard({ reference, large }: { reference: SlideReference; large?: boolean }) {
+  const thumb = reference.thumbnailUrl || buildSlideImageUrl(reference.deckId, reference.slideNumber);
+  const cardPadding = large ? "18px 20px" : "14px 16px";
+  const titleSize = large ? 16 : 15;
+  const aspectRatio = large ? "16 / 9" : "16 / 10";
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: large ? 12 : 8,
+        padding: cardPadding,
+        borderRadius: large ? 18 : 16,
+        border: "1px solid #dbe2f0",
+        background: "#f8fafc",
+        boxShadow: large ? "0 16px 38px rgba(15,23,42,0.12)" : "0 10px 25px rgba(15,23,42,0.08)",
+      }}
+    >
       <div
         style={{
           width: "100%",
-          maxWidth: 820,             // readable width like ChatGPT
-          margin: "0 auto",          // centered on the page
-          background: "transparent", // ← no card/bubble
-          color: "#111827",
-          border: "none",
-          padding: 0,                // ← no extra box padding
-          boxShadow: "none",
-          lineHeight: 1.65,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          fontSize: 16,
+          aspectRatio,
+          borderRadius: large ? 14 : 12,
+          overflow: "hidden",
+          background: "linear-gradient(135deg, #e2e8f0, #f1f5f9)",
         }}
       >
-        {text}
+        {thumb ? (
+          <img
+            src={thumb}
+            alt={`${reference.deckName ?? "Deck"} slide ${reference.slideNumber ?? ""}`}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              placeItems: "center",
+              height: "100%",
+              color: "#94a3b8",
+              fontSize: 12,
+            }}
+          >
+            No image
+          </div>
+        )}
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ fontSize: titleSize, fontWeight: 600, color: "#0f172a" }}>
+          {reference.deckName ?? "Deck"}
+        </div>
+        {reference.slideNumber && (
+          <div style={{ fontSize: 13, color: "#475569" }}>Slide {reference.slideNumber}</div>
+        )}
+        {typeof reference.similarity === "number" && !Number.isNaN(reference.similarity) && (
+          <div style={{ fontSize: 12, color: "#64748b" }}>
+            {(() => {
+              const clamped = Math.max(0, Math.min(1, reference.similarity ?? 0));
+              return `Similarity ${(clamped * 100).toFixed(1)}%`;
+            })()}
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function DeckThumbnailCard({ deck }: { deck: DeckPreview }) {
+  const primaryThumb = deck.coverThumbnailUrl ?? deck.thumbnailUrl;
+  const pdfDoc = usePdfDocument(primaryThumb ? undefined : deck.pdfUrl);
+  const pdfThumb = usePageBitmap(pdfDoc, 1, 320);
+  const previewSrc = primaryThumb ?? pdfThumb ?? null;
+  const initials = deck.title
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1).toUpperCase())
+    .join("") || "DX";
+  const updated = formatRelativeDate(deck.updatedAt);
+
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 12,
+        background: "#ffffff",
+        borderRadius: 18,
+        border: "1px solid #e2e8f0",
+        boxShadow: "0 16px 40px rgba(15,23,42,0.08)",
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "16 / 9",
+          borderRadius: 12,
+          overflow: "hidden",
+          background: "linear-gradient(135deg, #e0e7ff, #f3f4f6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {previewSrc ? (
+          <img
+            src={previewSrc}
+            alt={`${deck.title} preview`}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <span style={{ fontSize: 32, fontWeight: 700, color: "#4338ca", letterSpacing: 1 }}>{initials}</span>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a" }}>{deck.title}</div>
+        {deck.description && <div style={{ fontSize: 13, color: "#64748b" }}>{deck.description}</div>}
+        {updated && <div style={{ fontSize: 12, color: "#9ca3af" }}>Updated {updated}</div>}
+      </div>
+    </article>
+  );
+}
+
+function DeckThumbnailSkeleton() {
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 12,
+        background: "#ffffff",
+        borderRadius: 18,
+        border: "1px solid #e5e7eb",
+        padding: 16,
+        boxShadow: "0 16px 36px rgba(15,23,42,0.05)",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          aspectRatio: "16 / 9",
+          borderRadius: 12,
+          background: "linear-gradient(135deg, #e2e8f0, #f1f5f9)",
+        }}
+      />
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ height: 14, background: "#e5e7eb", borderRadius: 999 }} />
+        <div style={{ height: 12, background: "#eef2f7", borderRadius: 999 }} />
+        <div style={{ height: 12, background: "#f1f5f9", borderRadius: 999, width: "60%" }} />
+      </div>
+    </article>
   );
 }
 
@@ -668,7 +1178,7 @@ function UploadPrepView({
             opacity: !file || busy ? 0.65 : 1,
           }}
         >
-          {busy ? "Uploading…" : "Upload & open builder"}
+          {busy ? "Uploading..." : "Upload & open builder"}
         </button>
       </form>
     </div>
@@ -808,7 +1318,7 @@ function Uploader({
         onChange={(e) => setFile(e.target.files?.[0] ?? null)}
       />
       <button type="submit" disabled={!file || busy} style={btnStyle}>
-        {busy ? "Uploading…" : "Upload & Render"}
+        {busy ? "Uploading..." : "Upload & Render"}
       </button>
       {file && <div style={{ fontSize: 12, color: "#6b7280" }}>{file.name}</div>}
       {!file && fileLabel && <div style={{ fontSize: 12, color: "#6b7280" }}>{fileLabel}</div>}
@@ -869,7 +1379,7 @@ function RuleEditorPlaceholder() {
     >
       <div style={{ fontWeight: 700, marginBottom: 12 }}>Rule Editor</div>
       <div style={{ fontSize: 14, color: "#374151", opacity: 0.9 }}>
-        (UI for “if … then …” rules goes here)
+        (UI for "if ... then ..." rules goes here)
       </div>
     </div>
   );
@@ -969,6 +1479,72 @@ async function uploadDeck(file: File, instructions?: string): Promise<{ deck: Ex
   }
 }
 
+function usePdfDocument(src?: string) {
+  const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let loadingTask: any = null;
+
+    if (!src) {
+      setDoc(null);
+      return () => {
+        cancelled = true;
+        if (loadingTask && typeof loadingTask.destroy === "function") {
+          try {
+            loadingTask.destroy();
+          } catch {
+            /* ignore */
+          }
+        }
+      };
+    }
+
+    async function load(currentSrc: string) {
+      try {
+        if (currentSrc.startsWith("data:")) {
+          const comma = currentSrc.indexOf(",");
+          const base64 = comma >= 0 ? currentSrc.slice(comma + 1) : currentSrc;
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          loadingTask = getDocument({ data: bytes });
+        } else {
+          loadingTask = getDocument({ url: currentSrc });
+        }
+
+        const loaded: PDFDocumentProxy = await loadingTask.promise;
+        if (!cancelled) {
+          setDoc(loaded);
+        }
+      } catch (error) {
+        console.error("Failed to load PDF preview", error);
+        if (!cancelled) {
+          setDoc(null);
+        }
+      }
+    }
+
+    load(src);
+
+    return () => {
+      cancelled = true;
+      setDoc(null);
+      if (loadingTask && typeof loadingTask.destroy === "function") {
+        try {
+          loadingTask.destroy();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [src]);
+
+  return doc;
+}
+
 // High-DPI rasterization for thumbnails
 function usePageBitmap(doc: PDFDocumentProxy | null, pageNum: number, cssWidth: number) {
   const [src, setSrc] = useState<string | null>(null);
@@ -995,7 +1571,7 @@ function usePageBitmap(doc: PDFDocumentProxy | null, pageNum: number, cssWidth: 
       const ctx = canvas.getContext("2d")!;
       ctx.imageSmoothingQuality = "high";
 
-      const renderTask = page.render({ canvasContext: ctx, viewport: renderViewport });
+      const renderTask = page.render({ canvasContext: ctx, viewport: renderViewport, canvas });
       await renderTask.promise;
 
       if (!cancelled) setSrc(canvas.toDataURL("image/png"));
@@ -1070,7 +1646,7 @@ function Thumb({
       {src ? (
         <img src={src} alt={`Slide ${pageNum}`} style={{ width: "100%", display: "block", borderRadius: 6 }} />
       ) : (
-        <div style={{ height: 160, display: "grid", placeItems: "center", color: "#9ca3af" }}>Loading…</div>
+        <div style={{ height: 160, display: "grid", placeItems: "center", color: "#9ca3af" }}>Loading...</div>
       )}
       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>Slide {pageNum}</div>
     </div>
@@ -1124,7 +1700,7 @@ function MainSlideViewer({ doc, pageNum }: { doc: PDFDocumentProxy; pageNum: num
       const ctx = canvas.getContext("2d")!;
       ctx.imageSmoothingQuality = "high";
 
-      const task = page.render({ canvasContext: ctx, viewport: renderVp });
+      const task = page.render({ canvasContext: ctx, viewport: renderVp, canvas });
       await task.promise;
       if (cancelled) return;
     })();

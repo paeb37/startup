@@ -19,6 +19,13 @@ using System.Text.Json.Serialization.Metadata;
 using System.ComponentModel;
 using Microsoft.Extensions.Configuration;
 using DotNetEnv;
+using Docnet.Core;
+using Docnet.Core.Models;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Png;
+using Microsoft.AspNetCore.WebUtilities;
 
 public static partial class Program
 {
@@ -274,6 +281,98 @@ public static partial class Program
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
+        });
+
+        app.MapGet("/api/decks", async (HttpRequest request, CancellationToken cancellationToken) =>
+        {
+            var settings = ReadSupabaseSettings(app.Configuration);
+            if (settings is null)
+            {
+                return Results.Problem("Supabase storage is not configured", statusCode: 500);
+            }
+
+            var limit = 6;
+            if (request.Query.TryGetValue("limit", out var limitValues) && int.TryParse(limitValues.FirstOrDefault(), out var parsedLimit))
+            {
+                limit = Math.Clamp(parsedLimit, 1, 50);
+            }
+
+            var query = new Dictionary<string, string?>
+            {
+                ["select"] = "id,deck_name,original_filename,pdf_path,json_path,slide_count,created_at,updated_at",
+                ["order"] = "created_at.desc",
+                ["limit"] = limit.ToString()
+            };
+
+            var requestUri = QueryHelpers.AddQueryString($"{settings.Url}/rest/v1/{settings.DecksTable}", query);
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, requestUri);
+            httpRequest.Headers.Add("apikey", settings.ServiceKey);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+            httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await SharedHttpClient.SendAsync(httpRequest, cancellationToken);
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Results.Problem(
+                    detail: payload,
+                    statusCode: (int)response.StatusCode,
+                    title: $"Supabase decks query failed ({(int)response.StatusCode})");
+            }
+
+            return Results.Content(payload, "application/json");
+        });
+
+        app.MapGet("/api/decks/{deckId:guid}/slides/{slideNo:int}", async (Guid deckId, int slideNo, HttpRequest request, CancellationToken cancellationToken) =>
+        {
+            if (slideNo < 1)
+            {
+                return Results.BadRequest(new { error = "slideNo must be >= 1" });
+            }
+
+            var settings = ReadSupabaseSettings(app.Configuration);
+            if (settings is null)
+            {
+                return Results.Problem("Supabase storage is not configured", statusCode: 500);
+            }
+
+            var targetWidth = 960;
+            if (request.Query.TryGetValue("width", out var widthValues) && int.TryParse(widthValues.FirstOrDefault(), out var parsedWidth))
+            {
+                if (parsedWidth > 0)
+                {
+                    targetWidth = Math.Clamp(parsedWidth, 120, 2048);
+                }
+            }
+
+            var pdfInfo = await FetchDeckPdfInfoAsync(deckId, settings, cancellationToken);
+            if (string.IsNullOrWhiteSpace(pdfInfo.PdfPath))
+            {
+                return Results.NotFound(new { error = "Deck PDF not found" });
+            }
+
+            var pdfBytes = await DownloadSupabaseObjectAsync(settings, pdfInfo.PdfPath!, cancellationToken);
+            if (pdfBytes is null || pdfBytes.Length == 0)
+            {
+                return Results.NotFound(new { error = "Unable to download deck PDF" });
+            }
+
+            byte[] pngBytes;
+            try
+            {
+                pngBytes = RenderSlideToPng(pdfBytes, slideNo, targetWidth);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return Results.NotFound(new { error = "Slide not found" });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 500);
+            }
+
+            return Results.File(pngBytes, "image/png");
         });
 
         app.MapPost("/api/render", async (HttpRequest req) =>
@@ -579,6 +678,113 @@ public static partial class Program
     private static string NormalizeStoragePath(string path)
     {
         return path.Trim('/');
+    }
+
+    private static async Task<(string? PdfPath, string? PdfUrl)> FetchDeckPdfInfoAsync(
+        Guid deckId,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["select"] = "pdf_path",
+            ["id"] = $"eq.{deckId}",
+            ["limit"] = "1"
+        };
+
+        var requestUri = QueryHelpers.AddQueryString($"{settings.Url}/rest/v1/{settings.DecksTable}", query);
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return (null, null);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
+        {
+            return (null, null);
+        }
+
+        var first = doc.RootElement[0];
+        var pdfPath = first.TryGetProperty("pdf_path", out var pdfPathElement) && pdfPathElement.ValueKind == JsonValueKind.String
+            ? pdfPathElement.GetString()
+            : null;
+
+        return (pdfPath, null);
+    }
+
+    private static async Task<byte[]?> DownloadSupabaseObjectAsync(
+        SupabaseSettings settings,
+        string storagePath,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeStoragePath(storagePath);
+        var requestUri = $"{settings.Url}/storage/v1/object/{settings.StorageBucket}/{normalized}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    }
+
+    private static byte[] RenderSlideToPng(
+        byte[] pdfBytes,
+        int slideNumber,
+        int targetWidth = 960)
+    {
+        var pageIndex = slideNumber - 1;
+        if (pageIndex < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(slideNumber));
+        }
+
+        var widthHint = targetWidth > 0 ? targetWidth : 1024;
+        var heightHintCandidate = Math.Max(1, (int)Math.Round(widthHint * (3.0 / 4.0)));
+        var heightHint = Math.Max(widthHint + 1, heightHintCandidate);
+
+        using var docReader = DocLib.Instance.GetDocReader(pdfBytes, new PageDimensions(widthHint, heightHint));
+        var pageCount = docReader.GetPageCount();
+        if (pageIndex >= pageCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(slideNumber), $"Slide {slideNumber} does not exist (deck has {pageCount} slides).");
+        }
+
+        using var pageReader = docReader.GetPageReader(pageIndex);
+        var rawBytes = pageReader.GetImage();
+        var pageWidth = pageReader.GetPageWidth();
+        var pageHeight = pageReader.GetPageHeight();
+        var width = Math.Max(1, (int)Math.Round(Convert.ToDouble(pageWidth), MidpointRounding.AwayFromZero));
+        var height = Math.Max(1, (int)Math.Round(Convert.ToDouble(pageHeight), MidpointRounding.AwayFromZero));
+
+        using var image = Image.LoadPixelData<Bgra32>(rawBytes, width, height);
+
+        if (targetWidth > 0 && image.Width > targetWidth)
+        {
+            var ratio = targetWidth / (double)image.Width;
+            var newHeight = Math.Max(1, (int)Math.Round(image.Height * ratio));
+            image.Mutate(ctx => ctx.Resize(targetWidth, newHeight));
+        }
+
+        using var output = new MemoryStream();
+        image.Save(output, new PngEncoder
+        {
+            CompressionLevel = PngCompressionLevel.Level6
+        });
+
+        return output.ToArray();
     }
 
     private static async Task<Dictionary<int, List<string>>> GenerateImageCaptionsAsync(
