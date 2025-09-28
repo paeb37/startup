@@ -140,142 +140,76 @@ public static partial class Program
                     Console.Error.WriteLine($"Supabase persistence failed: {supabaseEx.Message}");
                 }
 
-                if (string.IsNullOrWhiteSpace(instructions))
+                object? ruleInfo = null;
+
+                if (!string.IsNullOrWhiteSpace(instructions))
                 {
-                    var result = new
+                    var semanticUrl = app.Configuration["SEMANTIC_URL"]
+                        ?? Environment.GetEnvironmentVariable("SEMANTIC_URL")
+                        ?? "http://localhost:8000";
+
+                    var redactUrl = semanticUrl.TrimEnd('/') + "/redact";
+
+                    using var client = new HttpClient();
+
+                    var payload = new
                     {
-                        deck,
-                        pdf = pdfInfo
+                        deckId = deckId,
+                        instructions,
+                        deck
                     };
 
-                    return Results.Text(JsonSerializer.Serialize(result, jsonOptions), "application/json");
+                    var payloadJson = JsonSerializer.Serialize(payload, jsonOptions);
+                    using var content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
+
+                    try
+                    {
+                        var response = await client.PostAsync(redactUrl, content);
+                        var responseBody = await response.Content.ReadAsStringAsync();
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            try
+                            {
+                                ruleInfo = JsonSerializer.Deserialize<JsonElement>(responseBody, jsonOptions);
+                            }
+                            catch
+                            {
+                                ruleInfo = new { success = true, raw = responseBody };
+                            }
+                        }
+                        else
+                        {
+                            ruleInfo = new
+                            {
+                                success = false,
+                                error = "semantic_service_failed",
+                                status = (int)response.StatusCode,
+                                body = responseBody
+                            };
+                        }
+                    }
+                    catch (Exception httpEx)
+                    {
+                        ruleInfo = new
+                        {
+                            success = false,
+                            error = "semantic_service_unavailable",
+                            detail = httpEx.Message
+                        };
+                    }
                 }
 
-                var semanticUrl = app.Configuration["SEMANTIC_URL"]
-                    ?? Environment.GetEnvironmentVariable("SEMANTIC_URL")
-                    ?? "http://localhost:8000";
-
-                var annotateUrl = semanticUrl.TrimEnd('/') + "/annotate";
-
-                using var client = new HttpClient();
-
-                var payload = new
+                var resultPayload = new
                 {
-                    deckId = deckId,
+                    deckId,
+                    deck,
+                    pdf = pdfInfo,
+                    rule = ruleInfo,
                     instructions
                 };
 
-                var payloadJson = JsonSerializer.Serialize(payload, jsonOptions);
-                using var content = new StringContent(payloadJson, Encoding.UTF8, "application/json");
-
-                try
-                {
-                    var response = await client.PostAsync(annotateUrl, content);
-                    var responseBody = await response.Content.ReadAsStringAsync();
-
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var annotation = JsonSerializer.Deserialize<AnnotationResponse>(responseBody, jsonOptions);
-
-                        if (annotation?.Actions is null)
-                        {
-                            return Results.Text(JsonSerializer.Serialize(new
-                            {
-                                deck,
-                                pdf = pdfInfo,
-                                annotation = new
-                                {
-                                    error = "semantic_service_invalid_response",
-                                    body = responseBody
-                                }
-                            }, jsonOptions), "application/json");
-                        }
-
-                        var actions = annotation.Actions;
-                        var redactions = ApplyActions(deck, actions, out var actionWarnings);
-
-                        var stats = new
-                        {
-                            redactionCount = redactions.Sum(r => r.Matches.Count),
-                            modifiedSlides = redactions.Select(r => r.Slide).Distinct().Order().ToArray()
-                        };
-
-                        var meta = annotation.Meta != null
-                            ? new Dictionary<string, object?>(annotation.Meta)
-                            : new Dictionary<string, object?>();
-
-                        if (!string.IsNullOrWhiteSpace(annotation.DeckId))
-                        {
-                            meta["deckId"] = annotation.DeckId;
-                        }
-
-                        if (actionWarnings.Count > 0)
-                        {
-                            meta["pipelineWarnings"] = actionWarnings;
-                        }
-
-                        object? exportInfo;
-                        try
-                        {
-                            ms.Position = 0;
-                            var sanitizedBytes = CreateSanitizedCopy(ms, deck, actions);
-                            var sanitizedBase64 = Convert.ToBase64String(sanitizedBytes);
-                            var sanitizedFile = Path.GetFileNameWithoutExtension(deck.file) + "_redacted.pptx";
-                            exportInfo = new
-                            {
-                                fileName = sanitizedFile,
-                                pptxBase64 = sanitizedBase64
-                            };
-                        }
-                        catch (Exception exportEx)
-                        {
-                            exportInfo = new
-                            {
-                                error = "sanitized_export_failed",
-                                detail = exportEx.Message
-                            };
-                        }
-
-                        var result = new
-                        {
-                            instructions,
-                            actions,
-                            deck,
-                            redactions,
-                            stats,
-                            export = exportInfo,
-                            pdf = pdfInfo,
-                            meta
-                        };
-
-                        return Results.Text(JsonSerializer.Serialize(result, jsonOptions), "application/json");
-                    }
-
-                    return Results.Text(JsonSerializer.Serialize(new
-                    {
-                        deck,
-                        pdf = pdfInfo,
-                        annotation = new
-                        {
-                            error = "semantic_service_failed",
-                            status = (int)response.StatusCode,
-                            body = responseBody
-                        }
-                    }, jsonOptions), "application/json");
-                }
-                catch (Exception httpEx)
-                {
-                    return Results.Text(JsonSerializer.Serialize(new
-                    {
-                        deck,
-                        pdf = pdfInfo,
-                        annotation = new
-                        {
-                            error = "semantic_service_unavailable",
-                            detail = httpEx.Message
-                        }
-                    }, jsonOptions), "application/json");
-                }
+                return Results.Text(JsonSerializer.Serialize(resultPayload, jsonOptions), "application/json");
             }
             catch (Exception ex)
             {
@@ -322,6 +256,117 @@ public static partial class Program
             }
 
             return Results.Content(payload, "application/json");
+        });
+
+        app.MapPost("/api/decks/{deckId:guid}/redact", async (Guid deckId, CancellationToken cancellationToken) =>
+        {
+            var settings = ReadSupabaseSettings(app.Configuration);
+            if (settings is null)
+            {
+                return Results.Problem(
+                    detail: "Supabase storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
+                    statusCode: 500);
+            }
+
+            DeckRecord? deckRecord;
+            try
+            {
+                deckRecord = await FetchDeckRecordAsync(deckId, settings, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to load deck metadata: {ex.Message}", statusCode: 500);
+            }
+
+            if (deckRecord is null || string.IsNullOrWhiteSpace(deckRecord.PptxPath))
+            {
+                return Results.NotFound(new { error = "Deck PPTX not found" });
+            }
+
+            var originalPptx = await DownloadSupabaseObjectAsync(settings, deckRecord.PptxPath!, cancellationToken);
+            if (originalPptx is null || originalPptx.Length == 0)
+            {
+                return Results.NotFound(new { error = "Unable to download original deck" });
+            }
+
+            List<RuleActionRecord> ruleActions;
+            try
+            {
+                ruleActions = await FetchRuleActionsAsync(deckId, settings, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to load rule actions: {ex.Message}", statusCode: 500);
+            }
+
+            int appliedCount = 0;
+            byte[] redactedBytes;
+
+            if (ruleActions.Count > 0)
+            {
+                try
+                {
+                    redactedBytes = ApplyRuleActionsToPptx(originalPptx, ruleActions, out appliedCount);
+                }
+                catch (Exception ex)
+                {
+                    var detail = ex is AggregateException agg ? string.Join("; ", agg.InnerExceptions.Select(e => e.Message)) : ex.Message;
+                    return Results.Json(new
+                    {
+                        error = "failed_to_apply_redactions",
+                        message = detail,
+                        stack = ex.StackTrace,
+                    }, statusCode: 500);
+                }
+            }
+            else
+            {
+                redactedBytes = originalPptx;
+            }
+
+            var originalPath = NormalizeStoragePath(deckRecord.PptxPath!);
+            var directory = GetStorageDirectory(originalPath);
+            var originalFileName = Path.GetFileNameWithoutExtension(originalPath);
+            var redactedFileName = string.IsNullOrWhiteSpace(originalFileName)
+                ? $"{deckId.ToString("n")}-redacted.pptx"
+                : $"{originalFileName}-redacted.pptx";
+            var redactedPath = string.IsNullOrEmpty(directory)
+                ? redactedFileName
+                : $"{directory}/{redactedFileName}";
+
+            try
+            {
+                await UploadBytesToSupabaseStorageAsync(
+                    redactedBytes,
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    settings,
+                    redactedPath,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to upload redacted deck: {ex.Message}", statusCode: 500);
+            }
+
+            string? signedUrl = null;
+            try
+            {
+                signedUrl = await CreateSupabaseSignedUrlAsync(settings, redactedPath, 3600, cancellationToken);
+            }
+            catch
+            {
+                signedUrl = null;
+            }
+
+            return Results.Json(new
+            {
+                success = true,
+                actionsApplied = appliedCount,
+                path = redactedPath,
+                fileName = Path.GetFileName(redactedPath),
+                downloadUrl = signedUrl,
+                generated = ruleActions.Count > 0
+            });
         });
 
         app.MapGet("/api/decks/{deckId:guid}/slides/{slideNo:int}", async (Guid deckId, int slideNo, HttpRequest request, CancellationToken cancellationToken) =>
@@ -555,11 +600,16 @@ public static partial class Program
         var storagePrefix = configuration["SUPABASE_STORAGE_PREFIX"] ?? Environment.GetEnvironmentVariable("SUPABASE_STORAGE_PREFIX");
         var visionModel = configuration["OPENAI_VISION_MODEL"] ?? Environment.GetEnvironmentVariable("OPENAI_VISION_MODEL") ?? "gpt-4o-mini";
 
+        var rulesTable = configuration["SUPABASE_RULES_TABLE"] ?? Environment.GetEnvironmentVariable("SUPABASE_RULES_TABLE") ?? "rules";
+        var ruleActionsTable = configuration["SUPABASE_RULE_ACTIONS_TABLE"] ?? Environment.GetEnvironmentVariable("SUPABASE_RULE_ACTIONS_TABLE") ?? "rule_actions";
+
         return new SupabaseSettings(
             Url: url.TrimEnd('/'),
             ServiceKey: serviceKey,
             DecksTable: decksTable,
             SlidesTable: slidesTable,
+            RulesTable: rulesTable,
+            RuleActionsTable: ruleActionsTable,
             OpenAiKey: openAiKey,
             EmbeddingModel: embeddingModel,
             StorageBucket: storageBucket,
@@ -675,9 +725,49 @@ public static partial class Program
         return normalizedPath;
     }
 
+    private static async Task<string> UploadBytesToSupabaseStorageAsync(
+        byte[] content,
+        string contentType,
+        SupabaseSettings settings,
+        string objectPath,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = NormalizeStoragePath(objectPath);
+        var requestUri = $"{settings.Url}/storage/v1/object/{settings.StorageBucket}/{normalizedPath}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Add("x-upsert", "true");
+
+        request.Content = new ByteArrayContent(content);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase storage upload failed ({(int)response.StatusCode}): {body}");
+        }
+
+        return normalizedPath;
+    }
+
     private static string NormalizeStoragePath(string path)
     {
         return path.Trim('/');
+    }
+
+    private static string GetStorageDirectory(string path)
+    {
+        var normalized = NormalizeStoragePath(path);
+        var lastSlash = normalized.LastIndexOf('/');
+        if (lastSlash <= 0)
+        {
+            return string.Empty;
+        }
+
+        return normalized.Substring(0, lastSlash);
     }
 
     private static async Task<(string? PdfPath, string? PdfUrl)> FetchDeckPdfInfoAsync(
@@ -717,6 +807,511 @@ public static partial class Program
             : null;
 
         return (pdfPath, null);
+    }
+
+    private static async Task<DeckRecord?> FetchDeckRecordAsync(
+        Guid deckId,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["select"] = "id,deck_name,pptx_path,json_path,pdf_path",
+            ["id"] = $"eq.{deckId}",
+            ["limit"] = "1"
+        };
+
+        var requestUri = QueryHelpers.AddQueryString($"{settings.Url}/rest/v1/{settings.DecksTable}", query);
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase deck fetch failed ({(int)response.StatusCode}): {body}");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var first = doc.RootElement[0];
+
+        Guid id = deckId;
+        if (first.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String && Guid.TryParse(idElement.GetString(), out var parsedId))
+        {
+            id = parsedId;
+        }
+
+        return new DeckRecord
+        {
+            Id = id,
+            DeckName = first.TryGetProperty("deck_name", out var deckNameElement) && deckNameElement.ValueKind == JsonValueKind.String ? deckNameElement.GetString() : null,
+            PptxPath = first.TryGetProperty("pptx_path", out var pptxElement) && pptxElement.ValueKind == JsonValueKind.String ? pptxElement.GetString() : null,
+            JsonPath = first.TryGetProperty("json_path", out var jsonElement) && jsonElement.ValueKind == JsonValueKind.String ? jsonElement.GetString() : null,
+            PdfPath = first.TryGetProperty("pdf_path", out var pdfElement) && pdfElement.ValueKind == JsonValueKind.String ? pdfElement.GetString() : null
+        };
+    }
+
+    private static async Task<List<RuleActionRecord>> FetchRuleActionsAsync(
+        Guid deckId,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["select"] = "id,rule_id,deck_id,slide_no,element_key,bbox,original_text,new_text,created_at",
+            ["deck_id"] = $"eq.{deckId}",
+            ["order"] = "created_at.asc"
+        };
+
+        var requestUri = QueryHelpers.AddQueryString($"{settings.Url}/rest/v1/{settings.RuleActionsTable}", query);
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase rule_actions fetch failed ({(int)response.StatusCode}): {body}");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        var list = new List<RuleActionRecord>();
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return list;
+        }
+
+        foreach (var row in doc.RootElement.EnumerateArray())
+        {
+            if (!row.TryGetProperty("element_key", out var keyElement) || keyElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var key = keyElement.GetString() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(key)) continue;
+
+            int slideNo = 0;
+            if (row.TryGetProperty("slide_no", out var slideElement) && slideElement.ValueKind == JsonValueKind.Number)
+            {
+                slideElement.TryGetInt32(out slideNo);
+            }
+
+            BBox? bbox = null;
+            if (row.TryGetProperty("bbox", out var bboxElement) && bboxElement.ValueKind == JsonValueKind.Object)
+            {
+                bbox = new BBox
+                {
+                    x = TryGetJsonInt64(bboxElement, "x"),
+                    y = TryGetJsonInt64(bboxElement, "y"),
+                    w = TryGetJsonInt64(bboxElement, "w"),
+                    h = TryGetJsonInt64(bboxElement, "h")
+                };
+            }
+
+            Guid id = Guid.Empty;
+            if (row.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+            {
+                Guid.TryParse(idElement.GetString(), out id);
+            }
+
+            Guid ruleId = Guid.Empty;
+            if (row.TryGetProperty("rule_id", out var ruleIdElement) && ruleIdElement.ValueKind == JsonValueKind.String)
+            {
+                Guid.TryParse(ruleIdElement.GetString(), out ruleId);
+            }
+
+            var originalText = row.TryGetProperty("original_text", out var originalElement) && originalElement.ValueKind == JsonValueKind.String
+                ? originalElement.GetString()
+                : null;
+            var newText = row.TryGetProperty("new_text", out var newElement) && newElement.ValueKind == JsonValueKind.String
+                ? newElement.GetString()
+                : null;
+
+            list.Add(new RuleActionRecord
+            {
+                Id = id,
+                RuleId = ruleId,
+                DeckId = deckId,
+                SlideNo = slideNo,
+                ElementKey = key,
+                BBox = bbox,
+                OriginalText = originalText,
+                NewText = newText
+            });
+        }
+
+        return list;
+    }
+
+    private static long? TryGetJsonInt64(JsonElement element, string property)
+    {
+        if (!element.TryGetProperty(property, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            if (value.TryGetInt64(out var longValue))
+            {
+                return longValue;
+            }
+
+            if (value.TryGetDouble(out var doubleValue))
+            {
+                return (long)doubleValue;
+            }
+        }
+
+        return null;
+    }
+
+    private static byte[] ApplyRuleActionsToPptx(
+        byte[] originalBytes,
+        IReadOnlyList<RuleActionRecord> actions,
+        out int appliedCount)
+    {
+        appliedCount = 0;
+        if (actions.Count == 0)
+        {
+            return originalBytes;
+        }
+
+        using var stream = new MemoryStream(originalBytes.Length + 4096);
+        stream.Write(originalBytes, 0, originalBytes.Length);
+        stream.Position = 0;
+
+        using var document = PresentationDocument.Open(stream, true);
+
+        var presentationPart = document.PresentationPart ?? throw new InvalidOperationException("Invalid PPTX: missing PresentationPart");
+        var presentation = presentationPart.Presentation ?? throw new InvalidOperationException("Invalid PPTX: missing Presentation");
+
+        var slideParts = new Dictionary<string, SlidePart>(StringComparer.OrdinalIgnoreCase);
+        var slideActions = new Dictionary<string, List<(ElementKeyInfo Info, RuleActionRecord Action)>>(StringComparer.OrdinalIgnoreCase);
+
+        var slideIds = presentation.SlideIdList?.Elements<SlideId>() ?? Enumerable.Empty<SlideId>();
+        foreach (var slideId in slideIds)
+        {
+            if (slideId.RelationshipId?.Value is not string relId)
+            {
+                continue;
+            }
+
+            if (presentationPart.GetPartById(relId) is SlidePart slidePart)
+            {
+                var slideKey = slidePart.Uri.OriginalString.TrimStart('/');
+                slideParts[slideKey] = slidePart;
+            }
+        }
+
+        foreach (var action in actions)
+        {
+            if (string.IsNullOrWhiteSpace(action.ElementKey))
+            {
+                continue;
+            }
+
+            if (!TryParseElementKey(action.ElementKey, out var info))
+            {
+                continue;
+            }
+
+            if (!slideActions.TryGetValue(info.SlidePath, out var list))
+            {
+                list = new List<(ElementKeyInfo, RuleActionRecord)>();
+                slideActions[info.SlidePath] = list;
+            }
+
+            list.Add((info, action));
+        }
+
+        var modifiedSlides = new HashSet<SlidePart>();
+
+        foreach (var kvp in slideActions)
+        {
+            if (!slideParts.TryGetValue(kvp.Key, out var slidePart))
+            {
+                continue;
+            }
+
+            var slide = slidePart.Slide;
+            if (slide == null)
+            {
+                continue;
+            }
+
+            bool slideModified = false;
+            foreach (var (info, action) in kvp.Value)
+            {
+                if (!string.Equals(info.ElementType, "textbox", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var shape = slide.Descendants<P.Shape>()
+                    .FirstOrDefault(s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value == info.ElementId);
+
+                if (shape == null)
+                {
+                    continue;
+                }
+
+                if (TryApplyActionToShape(shape, action))
+                {
+                    appliedCount++;
+                    slideModified = true;
+                }
+            }
+
+            if (slideModified)
+            {
+                slide.Save();
+                modifiedSlides.Add(slidePart);
+            }
+        }
+
+        document.Save();
+        stream.Position = 0;
+        return stream.ToArray();
+    }
+
+    private static bool TryApplyActionToShape(P.Shape shape, RuleActionRecord action)
+    {
+        if (shape.TextBody == null)
+        {
+            return false;
+        }
+
+        var original = (action.OriginalText ?? string.Empty).Replace("\r\n", "\n");
+        var updated = (action.NewText ?? string.Empty).Replace("\r\n", "\n");
+        if (string.IsNullOrWhiteSpace(original))
+        {
+            return false;
+        }
+
+        foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>())
+        {
+            var paragraphText = ReadParagraphText(paragraph);
+            if (AreEquivalentText(paragraphText, original))
+            {
+                RewriteParagraph(paragraph, updated);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string ReadParagraphText(A.Paragraph paragraph)
+    {
+        var sb = new StringBuilder();
+        foreach (var child in paragraph.ChildElements)
+        {
+            switch (child)
+            {
+                case A.Run run when run.Text != null:
+                    sb.Append(run.Text.Text);
+                    break;
+                case A.Break:
+                    sb.Append('\n');
+                    break;
+                case A.Field field when field.Text != null:
+                    sb.Append(field.Text.Text);
+                    break;
+            }
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static void RewriteParagraph(A.Paragraph paragraph, string replacement)
+    {
+        replacement ??= string.Empty;
+        var normalized = replacement.Replace("\r\n", "\n");
+        var segments = normalized.Split('\n');
+        if (segments.Length == 0)
+        {
+            segments = new[] { string.Empty };
+        }
+
+        var existingRuns = paragraph.Elements<A.Run>().ToList();
+        var baseRun = existingRuns.FirstOrDefault();
+        if (baseRun == null)
+        {
+            baseRun = new A.Run();
+            paragraph.PrependChild(baseRun);
+        }
+
+        var templateRun = (A.Run)baseRun.CloneNode(true);
+        templateRun.RemoveAllChildren<A.Text>();
+
+        foreach (var run in existingRuns.Skip(1))
+        {
+            run.Remove();
+        }
+
+        foreach (var br in paragraph.Elements<A.Break>().ToList())
+        {
+            br.Remove();
+        }
+
+        baseRun.RemoveAllChildren<A.Text>();
+        baseRun.AppendChild(new A.Text(segments[0]));
+
+        OpenXmlElement insertAfter = baseRun;
+        for (int i = 1; i < segments.Length; i++)
+        {
+            var br = new A.Break();
+            paragraph.InsertAfter(br, insertAfter);
+            insertAfter = br;
+
+            var newRun = (A.Run)templateRun.CloneNode(true);
+            newRun.AppendChild(new A.Text(segments[i]));
+            paragraph.InsertAfter(newRun, insertAfter);
+            insertAfter = newRun;
+        }
+    }
+
+    private static bool AreEquivalentText(string a, string b)
+    {
+        if (string.Equals(a, b, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (string.Equals(a.Trim(), b.Trim(), StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return string.Equals(NormalizeWhitespace(a), NormalizeWhitespace(b), StringComparison.Ordinal);
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        var sb = new StringBuilder(value.Length);
+        bool inWhitespace = false;
+        foreach (var ch in value)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!inWhitespace)
+                {
+                    sb.Append(' ');
+                    inWhitespace = true;
+                }
+            }
+            else
+            {
+                sb.Append(ch);
+                inWhitespace = false;
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static bool TryParseElementKey(string elementKey, out ElementKeyInfo info)
+    {
+        info = new ElementKeyInfo(string.Empty, string.Empty, 0);
+        if (string.IsNullOrWhiteSpace(elementKey))
+        {
+            return false;
+        }
+
+        var parts = elementKey.Split('#');
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        var slidePath = parts[0].Trim();
+        var typeAndId = parts[1].Split(':');
+        if (typeAndId.Length != 2)
+        {
+            return false;
+        }
+
+        if (!uint.TryParse(typeAndId[1], out var elementId))
+        {
+            return false;
+        }
+
+        info = new ElementKeyInfo(slidePath, typeAndId[0], elementId);
+        return true;
+    }
+
+    private static async Task<string?> CreateSupabaseSignedUrlAsync(
+        SupabaseSettings settings,
+        string objectPath,
+        int expiresInSeconds,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeStoragePath(objectPath);
+        var requestUri = $"{settings.Url}/storage/v1/object/sign/{settings.StorageBucket}/{normalized}";
+
+        var payload = JsonSerializer.Serialize(new { expiresIn = expiresInSeconds });
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("signedURL", out var urlElement) || urlElement.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var signedUrl = urlElement.GetString();
+        if (string.IsNullOrEmpty(signedUrl))
+        {
+            return null;
+        }
+
+        return settings.Url.TrimEnd('/') + signedUrl!;
+    }
+
+    private sealed record ElementKeyInfo(string SlidePath, string ElementType, uint ElementId);
+
+    private sealed class DeckRecord
+    {
+        public Guid Id { get; init; }
+        public string? DeckName { get; init; }
+        public string? PptxPath { get; init; }
+        public string? JsonPath { get; init; }
+        public string? PdfPath { get; init; }
+    }
+
+    private sealed class RuleActionRecord
+    {
+        public Guid Id { get; init; }
+        public Guid RuleId { get; init; }
+        public Guid DeckId { get; init; }
+        public int SlideNo { get; init; }
+        public string ElementKey { get; init; } = string.Empty;
+        public BBox? BBox { get; init; }
+        public string? OriginalText { get; init; }
+        public string? NewText { get; init; }
     }
 
     private static async Task<byte[]?> DownloadSupabaseObjectAsync(
@@ -1323,6 +1918,8 @@ public static partial class Program
         string ServiceKey,
         string DecksTable,
         string SlidesTable,
+        string RulesTable,
+        string RuleActionsTable,
         string? OpenAiKey,
         string EmbeddingModel,
         string StorageBucket,

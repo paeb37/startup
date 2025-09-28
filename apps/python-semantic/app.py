@@ -27,6 +27,8 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_DECKS_TABLE = os.environ.get("SUPABASE_DECKS_TABLE", "decks")
 SUPABASE_SLIDES_TABLE = os.environ.get("SUPABASE_SLIDES_TABLE", "slides")
 SUPABASE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "decks")
+SUPABASE_RULES_TABLE = os.environ.get("SUPABASE_RULES_TABLE", "rules")
+SUPABASE_RULE_ACTIONS_TABLE = os.environ.get("SUPABASE_RULE_ACTIONS_TABLE", "rule_actions")
 SLIDE_IMAGE_BASE = os.environ.get("SLIDE_IMAGE_BASE", "http://localhost:5100")
 
 logging.basicConfig(level=logging.INFO)
@@ -69,9 +71,10 @@ Rules:
 - If you are unsure how to fulfill the request, return "actions": [] and explain in meta.notes."""
 
 
-class Payload(BaseModel):
-    deckId: Optional[str] = None
-    instructions: Optional[str] = None
+class RedactRequest(BaseModel):
+    deckId: str
+    instructions: str
+    deck: Dict[str, Any]
 
 
 app = Flask(__name__)
@@ -213,17 +216,22 @@ def _select_valid_action(actions: List[Dict[str, object]]) -> Optional[Dict[str,
     return None
 
 
-@app.post("/annotate")
-def annotate():
+@app.post("/redact")
+def redact():
     try:
         data = request.get_json(force=True, silent=False)
-        payload = Payload.model_validate(data)
+        payload = RedactRequest.model_validate(data)
     except ValidationError as exc:
         return jsonify({"error": "bad payload", "details": exc.errors()}), 400
     except Exception as ex:
         return jsonify({"error": f"invalid JSON: {ex}"}), 400
 
-    instructions = (payload.instructions or "").strip()
+    deck_id = payload.deckId
+    instructions = payload.instructions.strip()
+    deck = payload.deck
+
+    if not instructions:
+        return jsonify({"error": "instructions required"}), 400
 
     actions = interpret_instructions(instructions)
     meta: Dict[str, object] = {"source": "heuristic" if actions else "none"}
@@ -243,19 +251,33 @@ def annotate():
                     llm_meta.update(llm_meta_payload)
             meta.update(llm_meta)
         except Exception as ex:
+            logging.error("LLM instruction parsing failed: %s", ex)
             meta = {"source": "fallback", "error": str(ex)}
 
-    needs_rewrite_context = any((action.get("type") or "").lower() == "rewrite" for action in actions)
-    if needs_rewrite_context and payload.deckId:
+    generated_actions = generate_rule_actions(deck, actions)
+
+    try:
+        title = generate_rule_title(instructions)
+        rule_id = insert_rule(deck_id, title, instructions)
+    except Exception as ex:
+        logging.error("Failed to insert rule: %s", ex)
+        return jsonify({"error": "rule_insert_failed", "detail": str(ex)}), 500
+
+    inserted_rows = 0
+    if generated_actions:
         try:
-            deck_json = fetch_deck_json(payload.deckId)
-            meta["rewriteContextSlides"] = len(deck_json.get("slides") or [])
+            for row in generated_actions:
+                row["rule_id"] = rule_id
+                row["deck_id"] = deck_id
+            inserted_rows = insert_rule_actions(generated_actions)
         except Exception as ex:
-            meta["deckFetchError"] = str(ex)
+            logging.error("Failed to insert rule actions: %s", ex)
+            return jsonify({"error": "rule_actions_insert_failed", "detail": str(ex)}), 500
 
     return jsonify({
-        "deckId": payload.deckId,
-        "actions": actions,
+        "deckId": deck_id,
+        "ruleId": rule_id,
+        "actionCount": inserted_rows,
         "meta": meta
     })
 
@@ -559,6 +581,228 @@ def answer_question(question: str) -> Tuple[str, List[Dict[str, Any]]]:
         return fallback, references
 
     return answer, references
+
+
+def generate_rule_actions(deck: Dict[str, Any], actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not actions:
+        return []
+
+    slides = deck.get("slides") or []
+    results: List[Dict[str, Any]] = []
+
+    for slide in slides:
+        slide_index = slide.get("index")
+        if slide_index is None:
+            continue
+        try:
+            slide_no = int(slide_index) + 1
+        except (TypeError, ValueError):
+            continue
+
+        elements = slide.get("elements") or []
+        for element in elements:
+            if element.get("type") != "textbox":
+                continue
+
+            element_key = element.get("key")
+            if not element_key:
+                continue
+
+            bbox = element.get("bbox")
+            paragraphs = element.get("paragraphs") or []
+
+            for paragraph in paragraphs:
+                original_text = paragraph.get("text") or ""
+                if not original_text or not isinstance(original_text, str):
+                    continue
+
+                new_text = original_text
+                changed = False
+
+                for action in actions:
+                    if not slide_in_scope(action.get("scope"), slide_no):
+                        continue
+
+                    new_text, action_changed = apply_text_action(new_text, action)
+                    if action_changed:
+                        changed = True
+
+                if changed and new_text != original_text:
+                    results.append(
+                        {
+                            "slide_no": slide_no,
+                            "element_key": element_key,
+                            "bbox": bbox,
+                            "original_text": original_text,
+                            "new_text": new_text,
+                        }
+                    )
+
+    return results
+
+
+def slide_in_scope(scope: Optional[Dict[str, Any]], slide_no: int) -> bool:
+    if not scope or not isinstance(scope, dict):
+        return True
+
+    slides = scope.get("slides")
+    if not slides or not isinstance(slides, dict):
+        return True
+
+    slide_list = slides.get("list")
+    if isinstance(slide_list, list) and len(slide_list) > 0:
+        normalized = []
+        for value in slide_list:
+            try:
+                normalized.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if normalized and slide_no in normalized:
+            return True
+        if normalized:
+            return False
+
+    from_value = slides.get("from")
+    to_value = slides.get("to")
+    if from_value is not None or to_value is not None:
+        try:
+            start = int(from_value) if from_value is not None else 1
+        except (TypeError, ValueError):
+            start = 1
+        try:
+            end = int(to_value) if to_value is not None else slide_no
+        except (TypeError, ValueError):
+            end = slide_no
+        if slide_no < start or slide_no > end:
+            return False
+
+    return True
+
+
+def apply_text_action(text: str, action: Dict[str, Any]) -> Tuple[str, bool]:
+    replacement = action.get("replacement")
+    if not isinstance(replacement, str) or not replacement.strip():
+        replacement = "[REDACTED]"
+
+    match = action.get("match") or {}
+    mode = (match.get("mode") or "keyword").lower()
+
+    updated_text = text
+    changed = False
+
+    if mode == "regex":
+        pattern = match.get("pattern")
+        if isinstance(pattern, str) and pattern.strip():
+            try:
+                regex = re.compile(pattern, re.IGNORECASE)
+                if regex.search(updated_text):
+                    updated_text = regex.sub(replacement, updated_text)
+                    changed = updated_text != text
+            except re.error as exc:
+                logging.warning("Invalid regex pattern '%s': %s", pattern, exc)
+    else:
+        tokens = match.get("tokens") or []
+        token_list = [t.strip() for t in tokens if isinstance(t, str) and t.strip()]
+        if token_list:
+            for token in token_list:
+                regex = re.compile(re.escape(token), re.IGNORECASE)
+                if regex.search(updated_text):
+                    updated_text = regex.sub(replacement, updated_text)
+                    changed = True
+
+    return updated_text, changed
+
+
+def generate_rule_title(instructions: str) -> str:
+    instruction_text = instructions.strip()
+    if not instruction_text:
+        return "Untitled rule"
+
+    client = _get_openai_client()
+    prompt = (
+        "Summarize this redaction instruction in 3 to 6 words. "
+        "Return only the summary text with no punctuation at the end.\n\n"
+        f"Instruction: {instruction_text}"
+    )
+
+    try:
+        response = client.responses.create(
+            model=os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
+            input=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        summary = response.output_text.strip()
+        if summary:
+            return summary[:120]
+    except Exception as exc:
+        logging.warning("Failed to generate rule title: %s", exc)
+
+    fallback = instruction_text
+    if len(fallback) > 120:
+        fallback = fallback[:117] + "..."
+    return fallback or "Untitled rule"
+
+
+def insert_rule(deck_id: str, title: str, instructions: str) -> str:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("Supabase configuration missing")
+
+    payload = [
+        {
+            "deck_id": deck_id,
+            "title": title,
+            "user_query": instructions,
+        }
+    ]
+
+    url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_RULES_TABLE}"
+    response = _supabase_session.post(
+        url,
+        headers=_get_supabase_headers({
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+            "Accept": "application/json",
+        }),
+        json=payload,
+        timeout=20,
+    )
+
+    if response.status_code >= 400:
+        raise RuntimeError(f"Supabase rule insert failed ({response.status_code}): {response.text}")
+
+    try:
+        rows = response.json()
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid JSON from Supabase rule insert: {exc}")
+
+    if not rows or not rows[0].get("id"):
+        raise RuntimeError("Supabase rule insert returned no id")
+
+    return rows[0]["id"]
+
+
+def insert_rule_actions(rows: List[Dict[str, Any]]) -> int:
+    if not rows:
+        return 0
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("Supabase configuration missing")
+
+    url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_RULE_ACTIONS_TABLE}"
+    response = _supabase_session.post(
+        url,
+        headers=_get_supabase_headers({
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }),
+        json=rows,
+        timeout=30,
+    )
+
+    if response.status_code >= 400:
+        raise RuntimeError(f"Supabase rule_actions insert failed ({response.status_code}): {response.text}")
+
+    return len(rows)
 
 
 @app.post("/api/chat")

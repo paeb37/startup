@@ -1,5 +1,5 @@
 // App.tsx
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 
@@ -78,10 +78,6 @@ type SlideReference = {
 type RenderResult = {
   pdfUrl: string;
   doc: PDFDocumentProxy;
-  redactedFileName?: string;
-  redactedPptxBase64?: string;
-  redactedPdfUrl?: string;
-  redactedDoc?: PDFDocumentProxy;
 };
 
 type BuilderSeed = {
@@ -89,10 +85,53 @@ type BuilderSeed = {
   render: RenderResult;
   instructions: string;
   fileName?: string;
+  deckId?: string;
+};
+
+type RuleRecord = {
+  id: string;
+  deck_id: string;
+  title: string;
+  user_query: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type RuleActionRecord = {
+  id: string;
+  rule_id: string;
+  deck_id: string;
+  slide_no: number;
+  element_key: string;
+  bbox?: BBox | null;
+  original_text?: string | null;
+  new_text?: string | null;
+  created_at?: string;
+};
+
+type RedactResponsePayload = {
+  success?: boolean;
+  actionsApplied?: number;
+  path?: string;
+  fileName?: string;
+  downloadUrl?: string;
+  generated?: boolean;
 };
 
 const STORAGE_PUBLIC_BASE = (import.meta.env?.VITE_STORAGE_PUBLIC_BASE ?? "").trim();
 const SLIDE_IMAGE_BASE = (import.meta.env?.VITE_DECK_API_BASE ?? "").trim();
+const SUPABASE_URL = (import.meta.env?.VITE_SUPABASE_URL ?? "").trim();
+const SUPABASE_ANON_KEY = (import.meta.env?.VITE_SUPABASE_ANON_KEY ?? "").trim();
+const SUPABASE_RULES_TABLE = (import.meta.env?.VITE_SUPABASE_RULES_TABLE ?? "rules").trim();
+const SUPABASE_RULE_ACTIONS_TABLE = (import.meta.env?.VITE_SUPABASE_RULE_ACTIONS_TABLE ?? "rule_actions").trim();
+const SUPABASE_CONFIGURED = Boolean(
+  SUPABASE_URL &&
+  SUPABASE_ANON_KEY &&
+  SUPABASE_RULES_TABLE &&
+  SUPABASE_RULE_ACTIONS_TABLE,
+);
+
+const EMU_PER_POINT = 12700; // 1 point = 1/72", 1 inch = 914400 EMU
 
 /* ------------------------------ App ------------------------------ */
 
@@ -1074,12 +1113,13 @@ function UploadPrepView({
     setError(null);
 
     try {
-      const { deck, render } = await uploadDeck(file, instructions);
+      const { deck, render, deckId } = await uploadDeck(file, instructions);
       onComplete({
         deck,
         render,
         instructions: instructions.trim(),
         fileName: file.name,
+        deckId,
       });
     } catch (err: any) {
       setError(err?.message ?? "Upload failed");
@@ -1190,89 +1230,90 @@ function UploadPrepView({
 }
 
 function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [fileLabel, setFileLabel] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ExtractResponse | null>(seed?.deck ?? null);
   const [render, setRender] = useState<RenderResult | null>(seed?.render ?? null);
   const [selectedPage, setSelectedPage] = useState<number>(1);
-  const [showRedacted, setShowRedacted] = useState(false);
-  const [instructions, setInstructions] = useState<string>(seed?.instructions ?? "");
-  const redactedDocRef = useRef<PDFDocumentProxy | null>(null);
+  const [previewEnabled, setPreviewEnabled] = useState(false);
 
+  const deckId = seed?.deckId ?? null;
+
+  const {
+    actions: ruleActions,
+    loading: actionsLoading,
+    error: actionsError,
+    reload: reloadRuleActions,
+  } = useSupabaseRuleActions(deckId, previewEnabled);
+
+  const totalActions = ruleActions.length;
+
+  const slideActions = useMemo(() => {
+    if (!previewEnabled || !ruleActions.length) return [];
+    return ruleActions.filter((action) => action.slide_no === selectedPage);
+  }, [previewEnabled, ruleActions, selectedPage]);
+
+  const currentSlideCount = slideActions.length;
+
+  const previewAvailable = Boolean(deckId && SUPABASE_CONFIGURED);
+  const previewDisabledMessage = deckId && !SUPABASE_CONFIGURED ? "Connect Supabase to preview." : null;
+  const noActionsForSlide = previewEnabled && !actionsLoading && currentSlideCount === 0;
+
+  const [redactBusy, setRedactBusy] = useState(false);
+  const [redactError, setRedactError] = useState<string | null>(null);
+  const [redactResult, setRedactResult] = useState<RedactResponsePayload | null>(null);
+
+  async function handleRedactDeck() {
+    if (!deckId) {
+      setRedactError("Upload a deck first.");
+      return;
+    }
+    if (!SUPABASE_CONFIGURED) {
+      setRedactError("Supabase configuration missing.");
+      return;
+    }
+
+    setRedactBusy(true);
+    setRedactError(null);
+    setRedactResult(null);
+
+    try {
+      const response = await fetch(`/api/decks/${deckId}/redact`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Redaction failed (${response.status})`);
+      }
+
+      setRedactResult(payload as RedactResponsePayload);
+      setRedactError(null);
+      reloadRuleActions();
+    } catch (err: any) {
+      setRedactError(err?.message ?? "Failed to create redacted deck");
+      setRedactResult(null);
+    } finally {
+      setRedactBusy(false);
+    }
+  }
   useEffect(() => {
     return () => {
       if (render?.pdfUrl) URL.revokeObjectURL(render.pdfUrl);
-      if (render?.redactedPdfUrl) URL.revokeObjectURL(render.redactedPdfUrl);
     };
-  }, [render?.pdfUrl, render?.redactedPdfUrl]);
-
-  useEffect(() => {
-    const current = render?.redactedDoc ?? null;
-    const previous = redactedDocRef.current;
-    if (previous && previous !== current) {
-      try {
-        previous.destroy();
-      } catch {
-        /* ignore */
-      }
-    }
-    redactedDocRef.current = current;
-  }, [render?.redactedDoc]);
-
-  useEffect(() => {
-    return () => {
-      if (redactedDocRef.current) {
-        try {
-          redactedDocRef.current.destroy();
-        } catch {
-          /* ignore */
-        }
-        redactedDocRef.current = null;
-      }
-    };
-  }, []);
+  }, [render?.pdfUrl]);
 
   useEffect(() => {
     if (!seed) return;
-    setResult(seed.deck);
     setRender(seed.render);
     setSelectedPage(1);
-    setShowRedacted(false);
-    setFile(null);
-    setFileLabel(seed.fileName ?? (isDeck(seed.deck) ? seed.deck.file : null));
-    setInstructions(seed.instructions ?? "");
+    setPreviewEnabled(false);
+    setRedactResult(null);
+    setRedactError(null);
+    setRedactBusy(false);
   }, [seed]);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!file) return;
-
-    setBusy(true);
-    setResult(null);
-    setRender(null);
-    setSelectedPage(1);
-    setShowRedacted(false);
-
-    try {
-      const { deck, render } = await uploadDeck(file, instructions);
-      setResult(deck);
-      setRender(render);
-      setSelectedPage(1);
-      setFileLabel(file.name);
-    } catch (err: any) {
-      setResult({ error: err?.message ?? "Upload failed" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const redactedDoc = render?.redactedDoc ?? null;
-  const redactedAvailable = Boolean(render?.redactedPdfUrl);
-  const redactedReady = Boolean(redactedDoc);
-  const viewerMode = showRedacted && redactedReady ? "redacted" : "original";
-  const activeDoc = viewerMode === "redacted" ? redactedDoc : render?.doc;
-  const viewerKey = viewerMode;
+  const activeDoc = render?.doc ?? null;
+  const viewerKey = "original";
 
   useEffect(() => {
     if (!activeDoc) return;
@@ -1281,94 +1322,103 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
     }
   }, [activeDoc, selectedPage]);
 
-  function handleDownloadRedacted() {
-    if (!render?.redactedPptxBase64) return;
-    try {
-      const binary = atob(render.redactedPptxBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-
-      const blob = new Blob([bytes], {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      });
-      const downloadUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = render?.redactedFileName ?? "redacted.pptx";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(downloadUrl);
-    } catch (err) {
-      console.error("Failed to download redacted PPTX", err);
-    }
-  }
-
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
       <header style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
         <h1 style={{ margin: 0, fontSize: 20 }}>Rule Builder</h1>
       </header>
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr 220px", height: "100%", minHeight: 0 }}>
-        <aside style={{ padding: 16, borderRight: "1px solid #eee", overflow: "auto", background: "#fff" }}>
-          <Uploader busy={busy} file={file} fileLabel={file?.name ?? fileLabel ?? undefined} setFile={setFile} onSubmit={onSubmit} />
+        <aside
+          style={{
+            padding: "16px 16px 18px",
+            borderRight: "1px solid #eee",
+            background: "#fff",
+            display: "grid",
+            gridTemplateRows: "auto 1fr auto",
+            gap: 16,
+            minHeight: 0,
+          }}
+        >
+          <AddRulePanel />
 
-          {instructions && (
-            <div style={{ marginTop: 20 }}>
-              <h3 style={{ fontSize: 14, margin: "0 0 8px" }}>Redaction Notes</h3>
-              <div
-                style={{
-                  whiteSpace: "pre-wrap",
-                  background: "#f1f5f9",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 10,
-                  padding: 12,
-                  fontSize: 13,
-                  color: "#1f2937",
-                }}
-              >
-                {instructions}
+          <div style={{gap: 8, overflowY: "auto", minHeight: 0 }}>
+            <ActiveRulesPanel deckId={deckId} />
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <UploadDeckButton
+              disabled={!deckId || redactBusy}
+              busy={redactBusy}
+              onClick={handleRedactDeck}
+            />
+            {redactError && <div style={{ fontSize: 12, color: "#b91c1c" }}>{redactError}</div>}
+            {redactResult && (
+              <div style={{ fontSize: 12, color: "#047857", display: "grid", gap: 4 }}>
+                <span>
+                  Saved redacted deck{typeof redactResult.actionsApplied === "number" ? ` • ${redactResult.actionsApplied} change${redactResult.actionsApplied === 1 ? "" : "s"} applied` : ""}.
+                </span>
+                {redactResult.downloadUrl && (
+                  <a
+                    href={redactResult.downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#2563eb", textDecoration: "none", fontWeight: 600 }}
+                  >
+                    Download redacted deck
+                  </a>
+                )}
               </div>
-            </div>
-          )}
-
-          <h2 style={{ fontSize: 18, margin: "20px 0 12px" }}>Active Rules</h2>
-          <RuleListPlaceholder />
-          <hr style={{ margin: "20px 0" }} />
-          <h3 style={{ fontSize: 14, margin: "12px 0" }}>Raw JSON</h3>
-          <JSONViewer result={result} />
+            )}
+          </div>
         </aside>
 
         <main style={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, background: "#f9fafb" }}>
           <section style={{ padding: 16, borderBottom: "1px solid #eee" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <RuleEditorPlaceholder />
-              <RedactedToggle
-                available={redactedAvailable}
-                active={showRedacted}
-                onToggle={() => setShowRedacted((prev) => !prev)}
-                fileName={render?.redactedFileName}
-                onDownload={handleDownloadRedacted}
-                downloadAvailable={Boolean(render?.redactedPptxBase64)}
-              />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a" }}>Slide Preview</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <PreviewToggleButton
+                  enabled={previewEnabled}
+                  onToggle={() => setPreviewEnabled((prev) => !prev)}
+                  busy={previewEnabled && actionsLoading}
+                  disabled={!previewAvailable}
+                  total={totalActions}
+                  current={currentSlideCount}
+                />
+                {previewEnabled && actionsLoading && (
+                  <span style={{ fontSize: 12, color: "#64748b" }}>Loading overlays…</span>
+                )}
+                {noActionsForSlide && (
+                  <span style={{ fontSize: 12, color: "#64748b" }}>No redactions on this slide.</span>
+                )}
+                {previewEnabled && actionsError && (
+                  <span style={{ fontSize: 12, color: "#b91c1c" }}>{actionsError}</span>
+                )}
+                {previewDisabledMessage && (
+                  <span style={{ fontSize: 12, color: "#b91c1c" }}>{previewDisabledMessage}</span>
+                )}
+              </div>
             </div>
           </section>
 
           <section style={{ minHeight: 0, position: "relative" }}>
-            {showRedacted ? (
-              redactedReady && activeDoc ? (
-                <MainSlideViewer key={viewerKey} doc={activeDoc} pageNum={selectedPage} />
-              ) : redactedAvailable ? (
-                <EmptyState message="Loading redacted preview..." />
-              ) : render?.redactedPptxBase64 ? (
-                <EmptyState message="Redacted preview unavailable. Download the sanitized deck instead." />
-              ) : (
-                <EmptyState message="Redacted PPTX not available." />
-              )
-            ) : activeDoc ? (
-              <MainSlideViewer key={viewerKey} doc={activeDoc} pageNum={selectedPage} />
+            {activeDoc ? (
+              <MainSlideViewer
+                key={`${viewerKey}-${previewEnabled ? "preview" : "plain"}`}
+                doc={activeDoc}
+                pageNum={selectedPage}
+                highlights={slideActions}
+                previewEnabled={previewEnabled}
+                loadingHighlights={actionsLoading}
+              />
             ) : (
               <EmptyState message="Upload a .pptx to see a large preview here." />
             )}
@@ -1379,8 +1429,6 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
           <h2 style={{ fontSize: 18, margin: "8px 8px 12px" }}>Slide Deck</h2>
           {activeDoc ? (
             <ThumbRail key={viewerKey} doc={activeDoc} selected={selectedPage} onSelect={setSelectedPage} />
-          ) : showRedacted && redactedAvailable ? (
-            <EmptyState small message="Loading redacted preview..." />
           ) : (
             <EmptyState small message="No slides yet." />
           )}
@@ -1392,172 +1440,390 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
 
 /* ---------------------------- Components ---------------------------- */
 
-function Uploader({
-  busy,
-  file,
-  fileLabel,
-  setFile,
-  onSubmit,
-}: {
-  busy: boolean;
-  file: File | null;
-  fileLabel?: string;
-  setFile: (f: File | null) => void;
-  onSubmit: (e: React.FormEvent) => void;
-}) {
+function AddRulePanel() {
+  const [showOverlay, setShowOverlay] = useState(false);
+
   return (
-    <form onSubmit={onSubmit} style={{ display: "grid", gap: 8 }}>
-      <label style={{ fontSize: 12, color: "#6b7280" }}>Upload PowerPoint</label>
-      <input
-        type="file"
-        accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-      />
-      <button type="submit" disabled={!file || busy} style={btnStyle}>
-        {busy ? "Uploading..." : "Upload & Render"}
+    <>
+      <button
+        type="button"
+        onClick={() => setShowOverlay(true)}
+        style={{
+          appearance: "none",
+          border: "1px solid #2563eb",
+          borderRadius: 10,
+          padding: "10px 14px",
+          background: "#eff6ff",
+          color: "#1d4ed8",
+          fontSize: 14,
+          fontWeight: 600,
+          cursor: "pointer",
+          boxShadow: "0 6px 16px rgba(59,130,246,0.18)",
+        }}
+      >
+        + Add rule
       </button>
-      {file && <div style={{ fontSize: 12, color: "#6b7280" }}>{file.name}</div>}
-      {!file && fileLabel && <div style={{ fontSize: 12, color: "#6b7280" }}>{fileLabel}</div>}
-    </form>
+
+      {showOverlay && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              width: "min(480px, 90vw)",
+              background: "#ffffff",
+              borderRadius: 18,
+              padding: "24px 28px",
+              boxShadow: "0 24px 60px rgba(15,23,42,0.35)",
+              display: "grid",
+              gap: 16,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>New rule</h2>
+              <button
+                type="button"
+                onClick={() => setShowOverlay(false)}
+                style={{
+                  appearance: "none",
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 16,
+                  color: "#64748b",
+                  cursor: "pointer",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ fontSize: 14, color: "#475569" }}>todo</div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
-const btnStyle: React.CSSProperties = {
-  appearance: "none",
-  background: "#111827",
-  color: "#fff",
-  border: 0,
-  borderRadius: 8,
-  padding: "8px 12px",
-  fontWeight: 600,
-  cursor: "pointer",
-};
+function ActiveRulesPanel({ deckId }: { deckId: string | null }) {
+  const { rules, loading, error, reload, configured } = useSupabaseRules(deckId);
 
-function RuleListPlaceholder() {
-  const items = [
-    { title: "Rule 1", subtitle: "Redact dates" },
-    { title: "Rule 2", subtitle: "Redact client" },
-    { title: "Rule 3", subtitle: "Redact revenue" },
-    { title: "Rule 4", subtitle: "Redact client name" },
-  ];
+  const header = (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      <h2 style={{ fontSize: 18, margin: 0 }}>Active Rules</h2>
+      <button
+        type="button"
+        onClick={reload}
+        disabled={!deckId || !configured || loading}
+        style={{
+          border: "none",
+          background: "transparent",
+          color: !deckId || !configured ? "#cbd5f5" : loading ? "#94a3b8" : "#2563eb",
+          fontSize: 12,
+          cursor: !deckId || !configured || loading ? "default" : "pointer",
+          fontWeight: 600,
+        }}
+      >
+        Refresh
+      </button>
+    </div>
+  );
+
+  if (!deckId) {
+    return (
+      <div style={{ display: "grid", gap: 8 }}>
+        {header}
+        <div style={{ fontSize: 13, color: "#6b7280" }}>Upload a deck to see saved rules.</div>
+      </div>
+    );
+  }
+
+  if (!configured) {
+    return (
+      <div style={{ display: "grid", gap: 8 }}>
+        {header}
+        <div style={{ fontSize: 13, color: "#b91c1c", lineHeight: 1.4 }}>
+          Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to load rules.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {header}
+
+      {error && <div style={{ fontSize: 13, color: "#b91c1c" }}>{error}</div>}
+
+      {loading && rules.length === 0 && <RuleListSkeleton count={2} />}
+
+      {!loading && !error && rules.length === 0 && (
+        <div style={{ fontSize: 13, color: "#6b7280" }}>No rules yet. Generate instructions to add one.</div>
+      )}
+
+      {rules.length > 0 && (
+        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+          {`${rules.length} active rule${rules.length === 1 ? "" : "s"}`}
+        </div>
+      )}
+      
+      {rules.map((rule) => {
+        const created = formatTimestamp(rule.created_at);
+        return (
+          <div key={rule.id} style={ruleCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+              <strong style={{ fontSize: 14 }}>{rule.title || "Untitled rule"}</strong>
+              {created && <span style={{ fontSize: 11, color: "#94a3b8" }}>{created}</span>}
+            </div>
+            <div style={{ fontSize: 13, color: "#475569", marginTop: 4, whiteSpace: "pre-wrap" }}>{rule.user_query}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RuleListSkeleton({ count }: { count: number }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      {items.map((it, i) => (
-        <div key={i} style={ruleCard}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <strong>{it.title}</strong>
-            <a style={{ fontSize: 12, color: "#2563eb", textDecoration: "none", cursor: "pointer" }}>Edit</a>
-          </div>
-          <div style={{ fontSize: 14, color: "#374151", opacity: 0.9 }}>
-            Redact <span style={{ fontWeight: 700 }}>{it.subtitle.split(" ")[1] || it.subtitle}</span>
-          </div>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} style={{ ...ruleCard, background: "#f8fafc", borderColor: "#e2e8f0" }}>
+          <div style={{ height: 12, background: "#e2e8f0", borderRadius: 999, marginBottom: 8 }} />
+          <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999 }} />
         </div>
       ))}
     </div>
   );
 }
-const ruleCard: React.CSSProperties = {
-  background: "#e0ecff",
-  borderRadius: 12,
-  padding: 12,
-  border: "1px solid #c7dbff",
-};
 
-function RuleEditorPlaceholder() {
-  return (
-    <div
-      style={{
-        background: "#e0ecff",
-        border: "1px solid #c7dbff",
-        borderRadius: 16,
-        padding: 20,
-      }}
-    >
-      <div style={{ fontWeight: 700, marginBottom: 12 }}>Rule Editor</div>
-      <div style={{ fontSize: 14, color: "#374151", opacity: 0.9 }}>
-        (UI for "if ... then ..." rules goes here)
-      </div>
-    </div>
-  );
+function useSupabaseRules(deckId: string | null) {
+  const [rules, setRules] = useState<RuleRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    if (!deckId) {
+      setRules([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    if (!SUPABASE_CONFIGURED) {
+      setRules([]);
+      setLoading(false);
+      setError("Supabase configuration missing.");
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      try {
+        const params = new URLSearchParams({
+          select: "id,deck_id,title,user_query,created_at,updated_at",
+          order: "created_at.desc.nullslast",
+          deck_id: `eq.${deckId}`,
+        });
+
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_RULES_TABLE}?${params.toString()}`, {
+          method: "GET",
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            Accept: "application/json",
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || `Failed to load rules (${response.status})`);
+        }
+
+        const rows = (await response.json()) as RuleRecord[];
+        if (!controller.signal.aborted) {
+          setRules(Array.isArray(rows) ? rows : []);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setRules([]);
+        setError(err instanceof Error ? err.message : "Failed to load rules");
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [deckId, revision]);
+
+  const reload = useCallback(() => {
+    setRevision((value) => value + 1);
+  }, []);
+
+  return { rules, loading, error, reload, configured: SUPABASE_CONFIGURED };
 }
 
-function RedactedToggle({
-  available,
-  active,
-  onToggle,
-  fileName,
-  onDownload,
-  downloadAvailable,
+function useSupabaseRuleActions(deckId: string | null, enabled: boolean) {
+  const [actions, setActions] = useState<RuleActionRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    if (!deckId) {
+      setActions([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    if (!SUPABASE_CONFIGURED) {
+      setActions([]);
+      setLoading(false);
+      setError("Supabase configuration missing.");
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      try {
+        const params = new URLSearchParams({
+          select: "id,rule_id,deck_id,slide_no,element_key,bbox,original_text,new_text,created_at",
+          order: "created_at.desc.nullslast",
+          deck_id: `eq.${deckId}`,
+        });
+
+        const response = await fetch(
+          `${SUPABASE_URL}/rest/v1/${SUPABASE_RULE_ACTIONS_TABLE}?${params.toString()}`,
+          {
+            method: "GET",
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+              Accept: "application/json",
+            },
+            signal: controller.signal,
+          },
+        );
+
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || `Failed to load rule actions (${response.status})`);
+        }
+
+        const rows = (await response.json()) as RuleActionRecord[];
+        if (!controller.signal.aborted) {
+          const normalized = Array.isArray(rows)
+            ? rows
+                .map((row) => ({
+                  ...row,
+                  slide_no: Number((row as any).slide_no),
+                  bbox: row.bbox ?? null,
+                  original_text: row.original_text ?? null,
+                  new_text: row.new_text ?? null,
+                }))
+                .filter((row) => Number.isFinite(row.slide_no))
+            : [];
+          setActions(normalized);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Failed to load rule actions");
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [deckId, enabled, revision]);
+
+  const reload = useCallback(() => {
+    setRevision((value) => value + 1);
+  }, []);
+
+  return { actions, loading, error, reload };
+}
+
+function formatTimestamp(iso?: string) {
+  if (!iso) {
+    return null;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toLocaleString();
+}
+
+function UploadDeckButton({
+  onClick,
+  busy,
+  disabled,
 }: {
-  available: boolean;
-  active: boolean;
-  onToggle: () => void;
-  fileName?: string;
-  onDownload?: () => void;
-  downloadAvailable: boolean;
+  onClick: () => void;
+  busy?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <button
-        type="button"
-        onClick={available ? onToggle : undefined}
-        disabled={!available}
-        style={{
-          appearance: "none",
-          border: "1px solid #d1d5db",
-          borderRadius: 999,
-          padding: "6px 14px",
-          background: active ? "#111827" : "#f8fafc",
-          color: active ? "#fff" : available ? "#111827" : "#9ca3af",
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: available ? "pointer" : "not-allowed",
-          transition: "all 0.15s ease",
-        }}
-      >
-        {available ? (active ? "Showing redacted" : "Show redacted") : "Redacted unavailable"}
-      </button>
-      <button
-        type="button"
-        onClick={downloadAvailable && onDownload ? onDownload : undefined}
-        disabled={!downloadAvailable}
-        style={{
-          appearance: "none",
-          border: "1px solid #cbd5f5",
-          borderRadius: 999,
-          padding: "6px 12px",
-          background: downloadAvailable ? "#e0ecff" : "#f3f4f6",
-          color: downloadAvailable ? "#1d4ed8" : "#9ca3af",
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: downloadAvailable ? "pointer" : "not-allowed",
-        }}
-      >
-        Download {fileName ?? "redacted.pptx"}
-      </button>
-    </div>
+    <button
+      type="button"
+      style={{
+        appearance: "none",
+        border: "1px solid #111827",
+        borderRadius: 10,
+        padding: "10px 18px",
+        background: "#111827",
+        color: "#fff",
+        fontSize: 14,
+        fontWeight: 600,
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "transform 0.15s ease",
+        opacity: disabled ? 0.6 : 1,
+      }}
+      onClick={() => {
+        if (disabled) return;
+        onClick();
+      }}
+      disabled={disabled}
+    >
+      {busy ? "Saving…" : "Upload redacted deck"}
+    </button>
   );
 }
 
-function JSONViewer({ result }: { result: ExtractResponse | null }) {
-  if (!result) return null;
-  return (
-    <pre
-      style={{
-        background: "#f6f8fa",
-        border: "1px solid #e5e7eb",
-        borderRadius: 8,
-        padding: 8,
-        maxHeight: 260,
-        overflow: "auto",
-        fontSize: 12,
-        lineHeight: 1.4,
-      }}
-    >
-      {JSON.stringify(result, null, 2)}
-    </pre>
-  );
-}
+const ruleCard: React.CSSProperties = {
+  background: "#eef4ff",
+  borderRadius: 10,
+  padding: 10,
+  border: "1px solid #d7e4ff",
+};
 
 function EmptyState({ message, small }: { message: string; small?: boolean }) {
   return (
@@ -1577,11 +1843,10 @@ function EmptyState({ message, small }: { message: string; small?: boolean }) {
 
 /* ---------------------- PDF rendering helpers ---------------------- */
 
-function isDeck(res: ExtractResponse): res is Deck {
-  return (res as Deck)?.slides !== undefined;
-}
-
-async function uploadDeck(file: File, instructions?: string): Promise<{ deck: ExtractResponse; render: RenderResult }> {
+async function uploadDeck(
+  file: File,
+  instructions?: string,
+): Promise<{ deck: ExtractResponse; render: RenderResult; deckId?: string }> {
   const form = new FormData();
   form.append("file", file);
   if (instructions && instructions.trim()) {
@@ -1594,18 +1859,14 @@ async function uploadDeck(file: File, instructions?: string): Promise<{ deck: Ex
     headers: { Accept: "application/json" },
   });
 
-  let payload: any;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error("Failed to parse upload response");
-  }
+  const payload = await response.json();
 
   if (!response.ok) {
     throw new Error(payload?.error ?? "Upload failed");
   }
 
   const deck = (payload?.deck ?? payload) as ExtractResponse;
+  const deckId = typeof payload?.deckId === "string" ? payload.deckId : undefined;
   if ((deck as any)?.error) {
     throw new Error((deck as any).error);
   }
@@ -1624,42 +1885,6 @@ async function uploadDeck(file: File, instructions?: string): Promise<{ deck: Ex
   const pdfBlob = new Blob([pdfBuffer], { type: "application/pdf" });
   const pdfUrl = URL.createObjectURL(pdfBlob);
 
-  let redactedName: string | undefined;
-  let redactedBase64: string | undefined;
-  let redactedPdfUrl: string | undefined;
-  let redactedDoc: PDFDocumentProxy | undefined;
-  const exportInfo = payload?.export;
-  const pptxBase64 = exportInfo?.pptxBase64;
-  if (pptxBase64 && typeof pptxBase64 === "string" && pptxBase64.length > 0) {
-    try {
-      const cleanedBase64 = pptxBase64.replace(/\s+/g, "");
-      const pptxBytes = atob(cleanedBase64);
-      const pptxBuffer = new Uint8Array(pptxBytes.length);
-      for (let i = 0; i < pptxBytes.length; i++) {
-        pptxBuffer[i] = pptxBytes.charCodeAt(i);
-      }
-
-      const pptxBlob = new Blob([pptxBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      });
-      redactedBase64 = cleanedBase64;
-      redactedName = typeof exportInfo?.fileName === "string" && exportInfo.fileName.trim().length > 0
-        ? exportInfo.fileName
-        : `${file.name.replace(/\.pptx$/i, "") || "deck"}_redacted.pptx`;
-
-      try {
-        const previewName = redactedName ?? file.name ?? "redacted.pptx";
-        const preview = await renderPptxPreview(pptxBlob, previewName);
-        redactedPdfUrl = preview.pdfUrl;
-        redactedDoc = preview.doc;
-      } catch (err) {
-        console.error("Failed to render redacted PPTX preview", err);
-      }
-    } catch (err) {
-      console.error("Failed to decode redacted PPTX", err);
-    }
-  }
-
   try {
     const doc = await getDocument({ data: pdfBuffer }).promise;
     return {
@@ -1667,52 +1892,12 @@ async function uploadDeck(file: File, instructions?: string): Promise<{ deck: Ex
       render: {
         pdfUrl,
         doc,
-        redactedFileName: redactedName,
-        redactedPptxBase64: redactedBase64,
-        redactedPdfUrl,
-        redactedDoc,
       },
+      deckId,
     };
   } catch (err) {
     URL.revokeObjectURL(pdfUrl);
-    if (redactedPdfUrl) URL.revokeObjectURL(redactedPdfUrl);
     throw err;
-  }
-}
-
-async function renderPptxPreview(pptxBlob: Blob, fileName: string): Promise<{ pdfUrl: string; doc: PDFDocumentProxy }> {
-  const form = new FormData();
-  form.append("file", pptxBlob, fileName);
-
-  const response = await fetch("/api/render", {
-    method: "POST",
-    body: form,
-  });
-
-  if (!response.ok) {
-    const detail = await safeReadJson(response);
-    throw new Error(detail?.error ?? `Render failed (${response.status})`);
-  }
-
-  const buffer = await response.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const pdfBlob = new Blob([bytes], { type: "application/pdf" });
-  const pdfUrl = URL.createObjectURL(pdfBlob);
-
-  try {
-    const doc = await getDocument({ data: bytes }).promise;
-    return { pdfUrl, doc };
-  } catch (err) {
-    URL.revokeObjectURL(pdfUrl);
-    throw err;
-  }
-}
-
-async function safeReadJson(response: Response): Promise<any> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
   }
 }
 
@@ -1890,13 +2075,26 @@ function Thumb({
   );
 }
 
-// Big center preview (fits to area; crisp; no resize loop)
-function MainSlideViewer({ doc, pageNum }: { doc: PDFDocumentProxy; pageNum: number }) {
+// Big center preview (fits to area; crisp; optional redaction overlays)
+function MainSlideViewer({
+  doc,
+  pageNum,
+  highlights = [],
+  previewEnabled = false,
+  loadingHighlights = false,
+}: {
+  doc: PDFDocumentProxy;
+  pageNum: number;
+  highlights?: RuleActionRecord[];
+  previewEnabled?: boolean;
+  loadingHighlights?: boolean;
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
+  const [renderInfo, setRenderInfo] = useState({ cssScale: 1, width: 0, height: 0 });
 
-  // Track available width/height
+  // Track available width/height for the viewer
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -1918,8 +2116,8 @@ function MainSlideViewer({ doc, pageNum }: { doc: PDFDocumentProxy; pageNum: num
       const vp = page.getViewport({ scale: 1 });
 
       // Fit-to-box scaling (contain), clamp to sane max CSS width
-      const MAX_CSS_W = 1200; // cap so it never dwarfs UI
-      const availW = Math.min(box.w - 32, MAX_CSS_W); // 16px padding each side
+      const MAX_CSS_W = 1200;
+      const availW = Math.min(box.w - 32, MAX_CSS_W);
       const availH = box.h - 32;
       const cssScale = Math.max(0.1, Math.min(availW / vp.width, availH / vp.height));
 
@@ -1928,14 +2126,22 @@ function MainSlideViewer({ doc, pageNum }: { doc: PDFDocumentProxy; pageNum: num
       const renderScale = cssScale * dpr;
       const renderVp = page.getViewport({ scale: renderScale });
 
-      const canvas = canvasRef.current!;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const cssWidth = Math.floor(renderVp.width / dpr);
+      const cssHeight = Math.floor(renderVp.height / dpr);
+
       canvas.width = Math.floor(renderVp.width);
       canvas.height = Math.floor(renderVp.height);
-      canvas.style.width = `${Math.floor(renderVp.width / dpr)}px`;
-      canvas.style.height = `${Math.floor(renderVp.height / dpr)}px`;
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
 
-      const ctx = canvas.getContext("2d")!;
       ctx.imageSmoothingQuality = "high";
+
+      setRenderInfo({ cssScale, width: cssWidth, height: cssHeight });
 
       const task = page.render({ canvasContext: ctx, viewport: renderVp, canvas });
       await task.promise;
@@ -1946,6 +2152,43 @@ function MainSlideViewer({ doc, pageNum }: { doc: PDFDocumentProxy; pageNum: num
       cancelled = true;
     };
   }, [doc, pageNum, box.w, box.h]);
+
+  const overlayRects = useMemo(() => {
+    if (!previewEnabled || !highlights.length || renderInfo.width <= 0 || renderInfo.cssScale <= 0) {
+      return [] as Array<{ id: string; x: number; y: number; width: number; height: number; action: RuleActionRecord }>;
+    }
+
+    const scale = renderInfo.cssScale;
+    const maxW = renderInfo.width;
+    const maxH = renderInfo.height;
+    const toNumber = (value: unknown) => (typeof value === "number" ? value : Number(value ?? 0));
+
+    const result: Array<{ id: string; x: number; y: number; width: number; height: number; action: RuleActionRecord }> = [];
+    for (const action of highlights) {
+      const bbox = action.bbox ?? {};
+      const xEmu = toNumber((bbox as any).x);
+      const yEmu = toNumber((bbox as any).y);
+      const wEmu = toNumber((bbox as any).w);
+      const hEmu = toNumber((bbox as any).h);
+      if (wEmu <= 0 || hEmu <= 0) continue;
+
+      const cssX = (xEmu / EMU_PER_POINT) * scale;
+      const cssY = (yEmu / EMU_PER_POINT) * scale;
+      const cssW = (wEmu / EMU_PER_POINT) * scale;
+      const cssH = (hEmu / EMU_PER_POINT) * scale;
+
+      if (cssW <= 1 || cssH <= 1) continue;
+
+      const clampedX = Math.max(0, Math.min(cssX, Math.max(0, maxW - 1)));
+      const clampedY = Math.max(0, Math.min(cssY, Math.max(0, maxH - 1)));
+      const clampedW = Math.max(2, Math.min(cssW, Math.max(0, maxW - clampedX)));
+      const clampedH = Math.max(2, Math.min(cssH, Math.max(0, maxH - clampedY)));
+
+      result.push({ id: action.id, x: clampedX, y: clampedY, width: clampedW, height: clampedH, action });
+    }
+
+    return result;
+  }, [previewEnabled, highlights, renderInfo.width, renderInfo.height, renderInfo.cssScale]);
 
   return (
     <div
@@ -1960,14 +2203,164 @@ function MainSlideViewer({ doc, pageNum }: { doc: PDFDocumentProxy; pageNum: num
         alignItems: "flex-start",
       }}
     >
-      <canvas
-        ref={canvasRef}
+      <div
         style={{
+          position: "relative",
           boxShadow: "0 2px 14px rgba(0,0,0,.08)",
           borderRadius: 8,
           background: "#fff",
+          overflow: "hidden",
+          width: renderInfo.width ? `${renderInfo.width}px` : "auto",
+          height: renderInfo.height ? `${renderInfo.height}px` : "auto",
         }}
-      />
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            display: "block",
+            width: renderInfo.width ? `${renderInfo.width}px` : "auto",
+            height: renderInfo.height ? `${renderInfo.height}px` : "auto",
+            borderRadius: 8,
+            background: "#fff",
+          }}
+        />
+
+        {previewEnabled && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+            }}
+          >
+            {loadingHighlights && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  right: 12,
+                  background: "rgba(15,23,42,0.75)",
+                  color: "#fff",
+                  fontSize: 11,
+                  padding: "4px 8px",
+                  borderRadius: 999,
+                  letterSpacing: 0.2,
+                }}
+              >
+                Loading…
+              </div>
+            )}
+
+            {overlayRects.map((rect) => {
+              const original = (rect.action.original_text ?? "").trim();
+              const replacement = (rect.action.new_text ?? "").trim();
+              const labelText = replacement || (original ? "[REDACTED]" : "Updated");
+              const snippet = labelText.length > 90 ? `${labelText.slice(0, 87)}…` : labelText;
+
+              return (
+                <div
+                  key={rect.id}
+                  style={{
+                    position: "absolute",
+                    left: `${rect.x}px`,
+                    top: `${rect.y}px`,
+                    width: `${rect.width}px`,
+                    height: `${rect.height}px`,
+                    border: "2px solid rgba(37,99,235,0.85)",
+                    borderRadius: 6,
+                    background: "rgba(37,99,235,0.16)",
+                    boxShadow: "0 12px 30px rgba(37,99,235,0.18)",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      left: 4,
+                      right: 4,
+                      background: "rgba(255,255,255,0.92)",
+                      color: "#1d4ed8",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      borderRadius: 4,
+                      padding: "2px 4px",
+                      lineHeight: 1.25,
+                      pointerEvents: "none",
+                      maxHeight: "65%",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {snippet}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+function PreviewToggleButton({
+  enabled,
+  onToggle,
+  busy,
+  disabled,
+  total,
+  current,
+}: {
+  enabled: boolean;
+  onToggle: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+  total?: number;
+  current?: number;
+}) {
+  const active = enabled && !disabled;
+  const hasTotal = typeof total === "number" && total > 0;
+  const currentCount = typeof current === "number" ? current : 0;
+
+  let label = "Preview rules";
+  if (disabled) {
+    label = "Preview rules";
+  } else if (busy && !active) {
+    label = "Loading…";
+  } else if (active) {
+    if (busy) {
+      label = "Loading…";
+    } else if (currentCount > 0) {
+      label = `Showing ${currentCount} change${currentCount === 1 ? "" : "s"}`;
+    } else {
+      label = "Previewing rules";
+    }
+  } else if (hasTotal) {
+    label = `Preview rules (${total})`;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (disabled) return;
+        onToggle();
+      }}
+      disabled={disabled}
+      style={{
+        appearance: "none",
+        border: `1px solid ${disabled ? "#dbeafe" : active ? "#1d4ed8" : "#cbd5f5"}`,
+        borderRadius: 999,
+        padding: "6px 16px",
+        background: disabled ? "#e2e8f0" : active ? "#1d4ed8" : "#e0ecff",
+        color: disabled ? "#94a3b8" : active ? "#fff" : "#1d4ed8",
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "all 0.15s ease",
+        boxShadow: active ? "0 8px 18px rgba(29,78,216,0.18)" : "none",
+        opacity: busy && !active ? 0.85 : 1,
+      }}
+    >
+      {label}
+    </button>
   );
 }
