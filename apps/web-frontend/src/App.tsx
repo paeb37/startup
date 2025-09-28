@@ -78,6 +78,10 @@ type SlideReference = {
 type RenderResult = {
   pdfUrl: string;
   doc: PDFDocumentProxy;
+  redactedFileName?: string;
+  redactedPptxBase64?: string;
+  redactedPdfUrl?: string;
+  redactedDoc?: PDFDocumentProxy;
 };
 
 type BuilderSeed = {
@@ -1192,19 +1196,49 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
   const [result, setResult] = useState<ExtractResponse | null>(seed?.deck ?? null);
   const [render, setRender] = useState<RenderResult | null>(seed?.render ?? null);
   const [selectedPage, setSelectedPage] = useState<number>(1);
+  const [showRedacted, setShowRedacted] = useState(false);
   const [instructions, setInstructions] = useState<string>(seed?.instructions ?? "");
+  const redactedDocRef = useRef<PDFDocumentProxy | null>(null);
 
   useEffect(() => {
     return () => {
       if (render?.pdfUrl) URL.revokeObjectURL(render.pdfUrl);
+      if (render?.redactedPdfUrl) URL.revokeObjectURL(render.redactedPdfUrl);
     };
-  }, [render?.pdfUrl]);
+  }, [render?.pdfUrl, render?.redactedPdfUrl]);
+
+  useEffect(() => {
+    const current = render?.redactedDoc ?? null;
+    const previous = redactedDocRef.current;
+    if (previous && previous !== current) {
+      try {
+        previous.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    redactedDocRef.current = current;
+  }, [render?.redactedDoc]);
+
+  useEffect(() => {
+    return () => {
+      if (redactedDocRef.current) {
+        try {
+          redactedDocRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        redactedDocRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!seed) return;
     setResult(seed.deck);
     setRender(seed.render);
     setSelectedPage(1);
+    setShowRedacted(false);
     setFile(null);
     setFileLabel(seed.fileName ?? (isDeck(seed.deck) ? seed.deck.file : null));
     setInstructions(seed.instructions ?? "");
@@ -1218,6 +1252,7 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
     setResult(null);
     setRender(null);
     setSelectedPage(1);
+    setShowRedacted(false);
 
     try {
       const { deck, render } = await uploadDeck(file, instructions);
@@ -1229,6 +1264,45 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
       setResult({ error: err?.message ?? "Upload failed" });
     } finally {
       setBusy(false);
+    }
+  }
+
+  const redactedDoc = render?.redactedDoc ?? null;
+  const redactedAvailable = Boolean(render?.redactedPdfUrl);
+  const redactedReady = Boolean(redactedDoc);
+  const viewerMode = showRedacted && redactedReady ? "redacted" : "original";
+  const activeDoc = viewerMode === "redacted" ? redactedDoc : render?.doc;
+  const viewerKey = viewerMode;
+
+  useEffect(() => {
+    if (!activeDoc) return;
+    if (selectedPage > activeDoc.numPages) {
+      setSelectedPage(activeDoc.numPages);
+    }
+  }, [activeDoc, selectedPage]);
+
+  function handleDownloadRedacted() {
+    if (!render?.redactedPptxBase64) return;
+    try {
+      const binary = atob(render.redactedPptxBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      const blob = new Blob([bytes], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = render?.redactedFileName ?? "redacted.pptx";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error("Failed to download redacted PPTX", err);
     }
   }
 
@@ -1269,12 +1343,32 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
 
         <main style={{ display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0, background: "#f9fafb" }}>
           <section style={{ padding: 16, borderBottom: "1px solid #eee" }}>
-            <RuleEditorPlaceholder />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <RuleEditorPlaceholder />
+              <RedactedToggle
+                available={redactedAvailable}
+                active={showRedacted}
+                onToggle={() => setShowRedacted((prev) => !prev)}
+                fileName={render?.redactedFileName}
+                onDownload={handleDownloadRedacted}
+                downloadAvailable={Boolean(render?.redactedPptxBase64)}
+              />
+            </div>
           </section>
 
           <section style={{ minHeight: 0, position: "relative" }}>
-            {render?.doc ? (
-              <MainSlideViewer doc={render.doc} pageNum={selectedPage} />
+            {showRedacted ? (
+              redactedReady && activeDoc ? (
+                <MainSlideViewer key={viewerKey} doc={activeDoc} pageNum={selectedPage} />
+              ) : redactedAvailable ? (
+                <EmptyState message="Loading redacted preview..." />
+              ) : render?.redactedPptxBase64 ? (
+                <EmptyState message="Redacted preview unavailable. Download the sanitized deck instead." />
+              ) : (
+                <EmptyState message="Redacted PPTX not available." />
+              )
+            ) : activeDoc ? (
+              <MainSlideViewer key={viewerKey} doc={activeDoc} pageNum={selectedPage} />
             ) : (
               <EmptyState message="Upload a .pptx to see a large preview here." />
             )}
@@ -1283,8 +1377,10 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
 
         <aside style={{ padding: 12, borderLeft: "1px solid #eee", overflow: "auto", background: "#fff" }}>
           <h2 style={{ fontSize: 18, margin: "8px 8px 12px" }}>Slide Deck</h2>
-          {render?.doc ? (
-            <ThumbRail doc={render.doc} selected={selectedPage} onSelect={setSelectedPage} />
+          {activeDoc ? (
+            <ThumbRail key={viewerKey} doc={activeDoc} selected={selectedPage} onSelect={setSelectedPage} />
+          ) : showRedacted && redactedAvailable ? (
+            <EmptyState small message="Loading redacted preview..." />
           ) : (
             <EmptyState small message="No slides yet." />
           )}
@@ -1385,6 +1481,64 @@ function RuleEditorPlaceholder() {
   );
 }
 
+function RedactedToggle({
+  available,
+  active,
+  onToggle,
+  fileName,
+  onDownload,
+  downloadAvailable,
+}: {
+  available: boolean;
+  active: boolean;
+  onToggle: () => void;
+  fileName?: string;
+  onDownload?: () => void;
+  downloadAvailable: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <button
+        type="button"
+        onClick={available ? onToggle : undefined}
+        disabled={!available}
+        style={{
+          appearance: "none",
+          border: "1px solid #d1d5db",
+          borderRadius: 999,
+          padding: "6px 14px",
+          background: active ? "#111827" : "#f8fafc",
+          color: active ? "#fff" : available ? "#111827" : "#9ca3af",
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: available ? "pointer" : "not-allowed",
+          transition: "all 0.15s ease",
+        }}
+      >
+        {available ? (active ? "Showing redacted" : "Show redacted") : "Redacted unavailable"}
+      </button>
+      <button
+        type="button"
+        onClick={downloadAvailable && onDownload ? onDownload : undefined}
+        disabled={!downloadAvailable}
+        style={{
+          appearance: "none",
+          border: "1px solid #cbd5f5",
+          borderRadius: 999,
+          padding: "6px 12px",
+          background: downloadAvailable ? "#e0ecff" : "#f3f4f6",
+          color: downloadAvailable ? "#1d4ed8" : "#9ca3af",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: downloadAvailable ? "pointer" : "not-allowed",
+        }}
+      >
+        Download {fileName ?? "redacted.pptx"}
+      </button>
+    </div>
+  );
+}
+
 function JSONViewer({ result }: { result: ExtractResponse | null }) {
   if (!result) return null;
   return (
@@ -1470,12 +1624,95 @@ async function uploadDeck(file: File, instructions?: string): Promise<{ deck: Ex
   const pdfBlob = new Blob([pdfBuffer], { type: "application/pdf" });
   const pdfUrl = URL.createObjectURL(pdfBlob);
 
+  let redactedName: string | undefined;
+  let redactedBase64: string | undefined;
+  let redactedPdfUrl: string | undefined;
+  let redactedDoc: PDFDocumentProxy | undefined;
+  const exportInfo = payload?.export;
+  const pptxBase64 = exportInfo?.pptxBase64;
+  if (pptxBase64 && typeof pptxBase64 === "string" && pptxBase64.length > 0) {
+    try {
+      const cleanedBase64 = pptxBase64.replace(/\s+/g, "");
+      const pptxBytes = atob(cleanedBase64);
+      const pptxBuffer = new Uint8Array(pptxBytes.length);
+      for (let i = 0; i < pptxBytes.length; i++) {
+        pptxBuffer[i] = pptxBytes.charCodeAt(i);
+      }
+
+      const pptxBlob = new Blob([pptxBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+      redactedBase64 = cleanedBase64;
+      redactedName = typeof exportInfo?.fileName === "string" && exportInfo.fileName.trim().length > 0
+        ? exportInfo.fileName
+        : `${file.name.replace(/\.pptx$/i, "") || "deck"}_redacted.pptx`;
+
+      try {
+        const previewName = redactedName ?? file.name ?? "redacted.pptx";
+        const preview = await renderPptxPreview(pptxBlob, previewName);
+        redactedPdfUrl = preview.pdfUrl;
+        redactedDoc = preview.doc;
+      } catch (err) {
+        console.error("Failed to render redacted PPTX preview", err);
+      }
+    } catch (err) {
+      console.error("Failed to decode redacted PPTX", err);
+    }
+  }
+
   try {
     const doc = await getDocument({ data: pdfBuffer }).promise;
-    return { deck, render: { pdfUrl, doc } };
+    return {
+      deck,
+      render: {
+        pdfUrl,
+        doc,
+        redactedFileName: redactedName,
+        redactedPptxBase64: redactedBase64,
+        redactedPdfUrl,
+        redactedDoc,
+      },
+    };
+  } catch (err) {
+    URL.revokeObjectURL(pdfUrl);
+    if (redactedPdfUrl) URL.revokeObjectURL(redactedPdfUrl);
+    throw err;
+  }
+}
+
+async function renderPptxPreview(pptxBlob: Blob, fileName: string): Promise<{ pdfUrl: string; doc: PDFDocumentProxy }> {
+  const form = new FormData();
+  form.append("file", pptxBlob, fileName);
+
+  const response = await fetch("/api/render", {
+    method: "POST",
+    body: form,
+  });
+
+  if (!response.ok) {
+    const detail = await safeReadJson(response);
+    throw new Error(detail?.error ?? `Render failed (${response.status})`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const pdfBlob = new Blob([bytes], { type: "application/pdf" });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+
+  try {
+    const doc = await getDocument({ data: bytes }).promise;
+    return { pdfUrl, doc };
   } catch (err) {
     URL.revokeObjectURL(pdfUrl);
     throw err;
+  }
+}
+
+async function safeReadJson(response: Response): Promise<any> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
 }
 
