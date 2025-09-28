@@ -60,8 +60,19 @@ type DeckPreview = {
   title: string;
   description?: string;
   thumbnailUrl?: string;
+  coverThumbnailUrl?: string;
   pdfUrl?: string;
+  pdfPath?: string;
   updatedAt?: string;
+};
+
+type SlideReference = {
+  slideId?: string;
+  deckId?: string;
+  deckName?: string;
+  slideNumber?: number;
+  similarity?: number;
+  thumbnailUrl?: string;
 };
 
 type RenderResult = {
@@ -77,6 +88,7 @@ type BuilderSeed = {
 };
 
 const STORAGE_PUBLIC_BASE = (import.meta.env?.VITE_STORAGE_PUBLIC_BASE ?? "").trim();
+const SLIDE_IMAGE_BASE = (import.meta.env?.VITE_DECK_API_BASE ?? "").trim();
 
 /* ------------------------------ App ------------------------------ */
 
@@ -292,21 +304,37 @@ function toPublicUrl(path?: string) {
   return `${base}/${clean}`;
 }
 
+function buildSlideImageUrl(deckId?: string, slideNumber?: number, provided?: string) {
+  if (provided && provided.startsWith("data:")) return provided;
+  if (provided && /^https?:\/\//i.test(provided)) return provided;
+  if (!deckId || !slideNumber) return provided;
+
+  const base = SLIDE_IMAGE_BASE || "";
+  const origin = base ? base.replace(/\/$/, "") : "";
+  return `${origin}/api/decks/${deckId}/slides/${slideNumber}`;
+}
+
 const FALLBACK_DECKS: DeckPreview[] = [
   {
     id: "fallback-onboarding",
     title: "Onboarding overview",
     description: "Sample deck to show the home layout.",
+    thumbnailUrl: "https://placehold.co/640x360/4c51bf/ffffff?text=Dexter",
+    coverThumbnailUrl: "https://placehold.co/640x360/4c51bf/ffffff?text=Dexter",
   },
   {
     id: "fallback-security",
     title: "Security briefing",
     description: "Placeholder deck - connect Supabase to replace it.",
+    thumbnailUrl: "https://placehold.co/640x360/2563eb/ffffff?text=Deck",
+    coverThumbnailUrl: "https://placehold.co/640x360/2563eb/ffffff?text=Deck",
   },
   {
     id: "fallback-metrics",
     title: "Q4 metrics recap",
     description: "Upload a deck to see the real preview here.",
+    thumbnailUrl: "https://placehold.co/640x360/1e293b/ffffff?text=Slide",
+    coverThumbnailUrl: "https://placehold.co/640x360/1e293b/ffffff?text=Slide",
   },
 ];
 
@@ -327,7 +355,14 @@ function normalizeDeckRecord(raw: any): DeckPreview | null {
   const id = raw.id ?? raw.deckId ?? raw.deck_id ?? raw.uuid ?? raw.slug;
   const title = raw.deck_name ?? raw.deckName ?? raw.title ?? raw.name ?? raw.original_filename;
   const pdfCandidate = raw.pdfUrl ?? raw.pdf_url ?? raw.pdf ?? raw.pdfPath ?? raw.pdf_path;
-  const thumbnailCandidate = raw.thumbnailUrl ?? raw.thumbnail_url ?? raw.preview_url ?? raw.cover_image ?? raw.cover;
+  const thumbnailCandidate =
+    raw.cover_thumbnail_url ??
+    raw.coverThumbnailUrl ??
+    raw.thumbnailUrl ??
+    raw.thumbnail_url ??
+    raw.preview_url ??
+    raw.cover_image ??
+    raw.cover;
   const description = raw.description ?? raw.summary ?? raw.notes ?? undefined;
   const updated = raw.updatedAt ?? raw.updated_at ?? raw.modified_at ?? raw.modifiedAt ?? raw.created_at ?? raw.createdAt;
 
@@ -335,9 +370,7 @@ function normalizeDeckRecord(raw: any): DeckPreview | null {
     ? toPublicUrl(pdfCandidate) ?? (pdfCandidate.startsWith("data:") ? pdfCandidate : undefined)
     : undefined;
 
-  const thumbnailUrl = typeof thumbnailCandidate === "string"
-    ? toPublicUrl(thumbnailCandidate) ?? (thumbnailCandidate.startsWith("data:") ? thumbnailCandidate : undefined)
-    : undefined;
+  const thumbnailUrl = buildSlideImageUrl(id ? String(id) : undefined, 1, typeof thumbnailCandidate === "string" ? thumbnailCandidate : undefined);
 
   const safeTitle = typeof title === "string" && title.trim().length > 0 ? title : "Untitled deck";
   const safeId = id
@@ -351,12 +384,74 @@ function normalizeDeckRecord(raw: any): DeckPreview | null {
     title: safeTitle,
     description: typeof description === "string" && description.trim().length > 0 ? description : undefined,
     pdfUrl,
+    pdfPath: typeof pdfCandidate === "string" ? pdfCandidate : undefined,
     thumbnailUrl,
+    coverThumbnailUrl: thumbnailUrl,
     updatedAt: typeof updated === "string" ? updated : undefined,
   };
 }
 
-type ChatMsg = { id: string; role: "user" | "assistant"; content: string };
+function normalizeSlideReference(raw: any): SlideReference | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const slideId = typeof raw.slideId === "string" ? raw.slideId : typeof raw.id === "string" ? raw.id : undefined;
+  const deckIdRaw = raw.deckId ?? raw.deck_id ?? raw.deckID ?? raw.deck;
+  const deckId = typeof deckIdRaw === "string" ? deckIdRaw : undefined;
+  const deckName = typeof raw.deckName === "string" ? raw.deckName : undefined;
+
+  let slideNumber: number | undefined;
+  const slideRaw = raw.slideNumber ?? raw.slide_no ?? raw.slide ?? raw.number;
+  if (typeof slideRaw === "number" && Number.isFinite(slideRaw)) {
+    slideNumber = slideRaw;
+  } else if (typeof slideRaw === "string") {
+    const parsed = parseInt(slideRaw, 10);
+    if (!Number.isNaN(parsed)) slideNumber = parsed;
+  }
+
+  const similarity = typeof raw.similarity === "number" ? raw.similarity : undefined;
+  const providedThumb = typeof raw.thumbnailUrl === "string"
+    ? raw.thumbnailUrl
+    : typeof raw.thumbnail_url === "string"
+      ? raw.thumbnail_url
+      : undefined;
+
+  const thumbnailUrl = buildSlideImageUrl(deckId, slideNumber, providedThumb ?? undefined);
+  console.log("normalizeSlideReference", {
+    slideId,
+    deckId,
+    deckName,
+    slideNumber,
+    similarity,
+    providedThumb,
+    thumbnailUrl,
+  });
+
+  return {
+    slideId,
+    deckId,
+    deckName,
+    slideNumber,
+    similarity,
+    thumbnailUrl,
+  };
+}
+
+function normalizeSlideReferences(raw: any): SlideReference[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list: SlideReference[] = [];
+  for (const item of raw) {
+    const normalized = normalizeSlideReference(item);
+    if (normalized) list.push(normalized);
+  }
+  return list.length > 0 ? list : undefined;
+}
+
+type ChatMsg = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources?: SlideReference[];
+};
 
 type HomeMode = "landing" | "chat";
 
@@ -430,10 +525,13 @@ function HomeView() {
         body: JSON.stringify({ message: text }),
       });
       const data = await res.json();
+      console.debug("/api/chat response", data);
       const reply = typeof data?.reply === "string" ? data.reply : "Sorry, something went wrong.";
+      const sources = normalizeSlideReferences(data?.sources);
+      console.debug("normalized slide sources", sources);
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: reply },
+        { id: crypto.randomUUID(), role: "assistant", content: reply, sources },
       ]);
     } catch (err) {
       console.error("Chat request failed", err);
@@ -657,12 +755,12 @@ function HomeView() {
 
 function ChatMessage({ message }: { message: ChatMsg }) {
   if (message.role === "assistant") {
-    return <AssistantMessage text={message.content} />;
+    return <AssistantMessage text={message.content} sources={message.sources} />;
   }
   return <UserMessage text={message.content} />;
 }
 
-function AssistantMessage({ text }: { text: string }) {
+function AssistantMessage({ text, sources }: { text: string; sources?: SlideReference[] }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       <div
@@ -679,16 +777,18 @@ function AssistantMessage({ text }: { text: string }) {
       >
         D
       </div>
-      <div
-        style={{
-          color: "#0f172a",
-          maxWidth: "min(720px, 80%)",
-          lineHeight: 1.65,
-          whiteSpace: "pre-wrap",
-          fontSize: 16,
-        }}
-      >
-        {text}
+      <div style={{ display: "grid", gap: 12, maxWidth: "min(720px, 80%)" }}>
+        <div
+          style={{
+            color: "#0f172a",
+            lineHeight: 1.65,
+            whiteSpace: "pre-wrap",
+            fontSize: 16,
+          }}
+        >
+          {text}
+        </div>
+        {sources && sources.length > 0 && <SlideReferenceList references={sources} />}
       </div>
     </div>
   );
@@ -748,10 +848,106 @@ function UserMessage({ text }: { text: string }) {
   );
 }
 
+function SlideReferenceList({ references }: { references: SlideReference[] }) {
+  if (references.length === 0) return null;
+
+  const [primary, ...rest] = references;
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <SlideReferenceCard reference={primary} large key={`primary-${primary.slideId ?? primary.deckId ?? 0}`} />
+      {rest.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gap: 16,
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          }}
+        >
+          {rest.map((ref, idx) => (
+            <SlideReferenceCard
+              reference={ref}
+              key={ref.slideId ?? `${ref.deckId ?? "deck"}-${ref.slideNumber ?? idx}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SlideReferenceCard({ reference, large }: { reference: SlideReference; large?: boolean }) {
+  const thumb = reference.thumbnailUrl || buildSlideImageUrl(reference.deckId, reference.slideNumber);
+  const cardPadding = large ? "18px 20px" : "14px 16px";
+  const titleSize = large ? 16 : 15;
+  const aspectRatio = large ? "16 / 9" : "16 / 10";
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: large ? 12 : 8,
+        padding: cardPadding,
+        borderRadius: large ? 18 : 16,
+        border: "1px solid #dbe2f0",
+        background: "#f8fafc",
+        boxShadow: large ? "0 16px 38px rgba(15,23,42,0.12)" : "0 10px 25px rgba(15,23,42,0.08)",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          aspectRatio,
+          borderRadius: large ? 14 : 12,
+          overflow: "hidden",
+          background: "linear-gradient(135deg, #e2e8f0, #f1f5f9)",
+        }}
+      >
+        {thumb ? (
+          <img
+            src={thumb}
+            alt={`${reference.deckName ?? "Deck"} slide ${reference.slideNumber ?? ""}`}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              placeItems: "center",
+              height: "100%",
+              color: "#94a3b8",
+              fontSize: 12,
+            }}
+          >
+            No image
+          </div>
+        )}
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ fontSize: titleSize, fontWeight: 600, color: "#0f172a" }}>
+          {reference.deckName ?? "Deck"}
+        </div>
+        {reference.slideNumber && (
+          <div style={{ fontSize: 13, color: "#475569" }}>Slide {reference.slideNumber}</div>
+        )}
+        {typeof reference.similarity === "number" && !Number.isNaN(reference.similarity) && (
+          <div style={{ fontSize: 12, color: "#64748b" }}>
+            {(() => {
+              const clamped = Math.max(0, Math.min(1, reference.similarity ?? 0));
+              return `Similarity ${(clamped * 100).toFixed(1)}%`;
+            })()}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DeckThumbnailCard({ deck }: { deck: DeckPreview }) {
-  const pdfDoc = usePdfDocument(deck.thumbnailUrl ? undefined : deck.pdfUrl);
+  const primaryThumb = deck.coverThumbnailUrl ?? deck.thumbnailUrl;
+  const pdfDoc = usePdfDocument(primaryThumb ? undefined : deck.pdfUrl);
   const pdfThumb = usePageBitmap(pdfDoc, 1, 320);
-  const previewSrc = deck.thumbnailUrl ?? pdfThumb ?? null;
+  const previewSrc = primaryThumb ?? pdfThumb ?? null;
   const initials = deck.title
     .split(/\s+/)
     .filter(Boolean)

@@ -23,6 +23,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_DECKS_TABLE = os.environ.get("SUPABASE_DECKS_TABLE", "decks")
 SUPABASE_SLIDES_TABLE = os.environ.get("SUPABASE_SLIDES_TABLE", "slides")
 SUPABASE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "decks")
+SLIDE_IMAGE_BASE = os.environ.get("SLIDE_IMAGE_BASE", "http://localhost:5100")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -352,6 +353,11 @@ def download_deck_json(json_path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def build_slide_image_url(deck_id: str, slide_no: int) -> str:
+    base = (SLIDE_IMAGE_BASE or "").rstrip("/")
+    return f"{base}/api/decks/{deck_id}/slides/{slide_no}"
+
+
 def extract_slide_text(slide: Dict[str, Any]) -> str:
     parts: List[str] = []
 
@@ -415,11 +421,24 @@ def build_context_from_matches(matches: List[Dict[str, Any]], max_contexts: int 
         if not deck_data:
             continue
 
-        slide_no = match.get("slide_no") or match.get("slide_number") or match.get("slide")
-        if slide_no is None:
+        slide_no_raw = match.get("slide_no") or match.get("slide_number") or match.get("slide")
+        if slide_no_raw is None:
             continue
 
-        slide = next((s for s in deck_data.get("slides", []) if s.get("index") == slide_no), None)
+        if isinstance(slide_no_raw, str):
+            try:
+                slide_index = int(slide_no_raw)
+            except ValueError:
+                continue
+        elif isinstance(slide_no_raw, (int, float)) and not isinstance(slide_no_raw, bool):
+            slide_index = int(slide_no_raw)
+        else:
+            continue
+
+        if slide_index < 0:
+            continue
+
+        slide = next((s for s in deck_data.get("slides", []) if s.get("index") == slide_index), None)
         if not slide:
             continue
 
@@ -429,12 +448,13 @@ def build_context_from_matches(matches: List[Dict[str, Any]], max_contexts: int 
 
         deck_name = deck_row.get("deck_name") or deck_row.get("original_filename") or deck_id
         similarity = match.get("similarity") or match.get("score")
+        human_slide_no = slide_index + 1
 
         contexts.append(
             {
                 "deck_id": deck_id,
                 "deck_name": deck_name,
-                "slide_no": slide_no,
+                "slide_no": human_slide_no,
                 "slide_id": match.get("id"),
                 "similarity": similarity,
                 "body": slide_text[:2000],
@@ -446,11 +466,12 @@ def build_context_from_matches(matches: List[Dict[str, Any]], max_contexts: int 
                 "slideId": match.get("id"),
                 "deckId": deck_id,
                 "deckName": deck_name,
-                "slideNumber": slide_no,
+                "slideNumber": human_slide_no,
                 "similarity": similarity,
+                "thumbnailUrl": build_slide_image_url(deck_id, human_slide_no),
             }
         )
-
+    
     return contexts, references
 
 
