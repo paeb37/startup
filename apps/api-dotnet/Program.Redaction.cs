@@ -167,7 +167,7 @@ public static partial class Program
         return false;
     }
 
-    private static List<(Regex regex, string label, string replacement)> BuildPatternsForAction(ActionDto action, string replacement, List<string> warnings)
+    private static List<(Regex regex, string label, string replacement)> BuildPatternsForAction(ActionDto action, string replacement, List<string>? warnings)
     {
         var list = new List<(Regex regex, string label, string replacement)>();
         var labelPrefix = !string.IsNullOrWhiteSpace(action.Id) ? action.Id! : $"action:{action.Type}";
@@ -177,42 +177,44 @@ public static partial class Program
 
         if (mode is null or "keyword")
         {
-            var tokens = match?.Tokens?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
-            if (tokens != null && tokens.Count > 0)
+            var tokens = match?.Tokens?
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Trim())
+                .Where(t => t.Length > 0)
+                .ToList();
+
+            if (tokens == null || tokens.Count == 0)
             {
-                foreach (var token in tokens)
-                {
-                    var escaped = Regex.Escape(token.Trim());
-                    list.Add((
-                        new Regex(escaped, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
-                        $"{labelPrefix}:keyword",
-                        replacement));
-                }
+                warnings?.Add($"replace action '{labelPrefix}' missing tokens");
+                return list;
             }
-            else
+
+            foreach (var token in tokens)
             {
-                warnings.Add($"replace action '{labelPrefix}' missing tokens");
+                list.Add((
+                    new Regex(Regex.Escape(token), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+                    $"{labelPrefix}:keyword",
+                    replacement));
             }
         }
         else if (mode == "regex")
         {
-            if (!string.IsNullOrWhiteSpace(match?.Pattern))
+            if (string.IsNullOrWhiteSpace(match?.Pattern))
             {
-                try
-                {
-                    list.Add((
-                        new Regex(match.Pattern!, RegexOptions.CultureInvariant),
-                        $"{labelPrefix}:regex",
-                        replacement));
-                }
-                catch (ArgumentException ex)
-                {
-                    warnings.Add($"invalid regex for action '{labelPrefix}': {ex.Message}");
-                }
+                warnings?.Add($"replace action '{labelPrefix}' missing pattern");
+                return list;
             }
-            else
+
+            try
             {
-                warnings.Add($"replace action '{labelPrefix}' missing pattern");
+                list.Add((
+                    new Regex(match.Pattern!, RegexOptions.CultureInvariant),
+                    $"{labelPrefix}:regex",
+                    replacement));
+            }
+            catch (ArgumentException ex)
+            {
+                warnings?.Add($"invalid regex for action '{labelPrefix}': {ex.Message}");
             }
         }
         else if (!string.IsNullOrWhiteSpace(match?.Pattern))
@@ -226,12 +228,12 @@ public static partial class Program
             }
             catch (ArgumentException ex)
             {
-                warnings.Add($"invalid regex for action '{labelPrefix}': {ex.Message}");
+                warnings?.Add($"invalid regex for action '{labelPrefix}': {ex.Message}");
             }
         }
-        else if (match == null)
+        else
         {
-            warnings.Add($"replace action '{labelPrefix}' missing match criteria");
+            warnings?.Add($"replace action '{labelPrefix}' missing match criteria");
         }
 
         return list;

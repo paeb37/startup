@@ -35,6 +35,10 @@ public static partial class Program
             // .env is optional; ignore if not found.
         }
 
+        Console.WriteLine($"[env] SUPABASE_URL={Environment.GetEnvironmentVariable("SUPABASE_URL") ?? "<null>"}");
+        Console.WriteLine($"[env] SUPABASE_SERVICE_ROLE_KEY={(Environment.GetEnvironmentVariable("SUPABASE_SERVICE_ROLE_KEY") is { Length: > 0 } ? "<set>" : "<null>")}");
+        Console.WriteLine($"[env] SUPABASE_STORAGE_BUCKET={Environment.GetEnvironmentVariable("SUPABASE_STORAGE_BUCKET") ?? "<null>"}");
+
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
@@ -800,8 +804,8 @@ public static partial class Program
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
             Console.Error.WriteLine($"Vision caption request failed ({(int)response.StatusCode}): {error}");
-            return null;
-        }
+        return null;
+    }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -1029,8 +1033,8 @@ public static partial class Program
     }
 
     private static string ExtractSlidePlainText(SlideDto slide)
-    {
-        var sb = new StringBuilder();
+        {
+            var sb = new StringBuilder();
 
         foreach (var element in slide.elements)
         {

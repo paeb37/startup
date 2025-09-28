@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 from pathlib import Path
 from time import perf_counter
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
+
+from supabase_client import fetch_deck_json
 
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -28,7 +32,7 @@ Return exactly one action inside the array, following this shape:
       },
       "match": {
         "mode": "keyword" | "regex",
-        "tokens": ["<keyword>"],
+        "tokens": ["<keyword>"] | [],
         "pattern": "\\$\\d[\\d,]*"
       },
       "replacement": "[CLIENT]",
@@ -50,27 +54,15 @@ Rules:
 - Omit fields that are not relevant, but never invent new keys.
 - If you are unsure how to fulfill the request, return "actions": [] and explain in meta.notes."""
 
-'''
-@app.post("/api/chat")
-def chat():
-    try:
-        data = request.get_json(force=True, silent=False) or {}
-        text = (data.get("message") or "").strip()
-        if not text:
-            return jsonify({"error": "message required"}), 400
-        return jsonify({
-            "reply": f"{text} noted"  # trivial echo + "noted"
-        })
-    except Exception as ex:
-        return jsonify({"error": f"invalid JSON: {ex}"}), 400
-'''
 
 class Payload(BaseModel):
     deckId: Optional[str] = None
     instructions: Optional[str] = None
 
+
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
 
 def interpret_instructions(instructions: str) -> List[Dict[str, object]]:
     """Heuristic fallback: derive simple replace actions."""
@@ -222,12 +214,31 @@ def annotate():
         except Exception as ex:
             meta = {"source": "fallback", "error": str(ex)}
 
+    needs_rewrite_context = any((action.get("type") or "").lower() == "rewrite" for action in actions)
+    if needs_rewrite_context and payload.deckId:
+        try:
+            deck_json = fetch_deck_json(payload.deckId)
+            meta["rewriteContextSlides"] = len(deck_json.get("slides") or [])
+        except Exception as ex:
+            meta["deckFetchError"] = str(ex)
+
     return jsonify({
-        "instructions": instructions,
         "deckId": payload.deckId,
         "actions": actions,
         "meta": meta
     })
+
+
+@app.post("/api/chat")
+def chat():
+    try:
+        data = request.get_json(force=True, silent=False) or {}
+        text = (data.get("message") or "").strip()
+        if not text:
+            return jsonify({"error": "message required"}), 400
+        return jsonify({"reply": f"{text} noted"})
+    except Exception as ex:
+        return jsonify({"error": f"invalid JSON: {ex}"}), 400
 
 
 if __name__ == "__main__":

@@ -30,7 +30,6 @@ public static partial class Program
             var slidePartsByUri = presentationPart.SlideParts.ToDictionary(sp => sp.Uri.OriginalString.TrimStart('/'));
 
             var replaceActions = new List<(ActionDto action, List<(Regex regex, string label, string replacement)> patterns)>();
-            var scratchWarnings = new List<string>();
 
             foreach (var action in actions)
             {
@@ -39,7 +38,7 @@ public static partial class Program
                     continue;
 
                 var replacement = string.IsNullOrWhiteSpace(action.Replacement) ? "[REDACTED]" : action.Replacement!;
-                var patterns = BuildPatternsForAction(action, replacement, scratchWarnings);
+                var patterns = BuildPatternsForAction(action, replacement, warnings: null);
                 if (patterns.Count > 0)
                 {
                     replaceActions.Add((action, patterns));
