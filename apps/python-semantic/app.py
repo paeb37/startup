@@ -78,7 +78,10 @@ class RedactRequest(BaseModel):
 
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app, resources={
+    r"/api/*": {"origins": "*"},
+    r"/redact": {"origins": ["http://localhost:5173"]},
+})
 
 
 def _get_openai_client() -> OpenAI:
