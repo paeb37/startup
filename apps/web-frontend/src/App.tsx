@@ -361,6 +361,18 @@ function toPublicUrl(path?: string) {
   return `${base}/${clean}`;
 }
 
+function resolveAssetUrl(raw?: string) {
+  if (!raw || typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const publicPath = toPublicUrl(trimmed);
+  if (publicPath) return publicPath;
+  if (/^(?:https?:|data:|blob:)/i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("/")) return trimmed;
+  return `/${trimmed}`;
+}
+
 function buildSlideImageUrl(deckId?: string, slideNumber?: number, provided?: string) {
   if (provided && provided.startsWith("data:")) return provided;
   if (provided && /^https?:\/\//i.test(provided)) return provided;
@@ -394,6 +406,42 @@ const FALLBACK_DECKS: DeckPreview[] = [
     coverThumbnailUrl: "https://placehold.co/640x360/1e293b/ffffff?text=Slide",
   },
 ];
+
+type LibraryDeck = DeckPreview & {
+  industry: string;
+  category: string;
+  summary: string;
+};
+
+const LIBRARY_INDUSTRIES = [
+  "Technology",
+  "Healthcare",
+  "Finance",
+  "Education",
+  "Retail",
+  "Manufacturing",
+];
+
+const LIBRARY_TYPES = [
+  "Overview",
+  "Pitch",
+  "Report",
+  "Training",
+  "Strategy",
+];
+
+function enrichDeckForLibrary(deck: DeckPreview, index: number): LibraryDeck {
+  const industry = LIBRARY_INDUSTRIES[index % LIBRARY_INDUSTRIES.length];
+  const category = LIBRARY_TYPES[index % LIBRARY_TYPES.length];
+  const summary = deck.description?.trim() || "No summary available yet.";
+
+  return {
+    ...deck,
+    industry,
+    category,
+    summary,
+  };
+}
 
 function formatRelativeDate(iso?: string) {
   if (!iso) return null;
@@ -453,16 +501,18 @@ function normalizeDeckRecord(raw: any): DeckPreview | null {
     }
   }
 
-  const providedThumb = typeof thumbnailCandidate === "string" && thumbnailCandidate.trim().length > 0
+  const rawThumb = typeof thumbnailCandidate === "string" && thumbnailCandidate.trim().length > 0
     ? thumbnailCandidate
     : undefined;
+  const providedThumb = resolveAssetUrl(rawThumb);
 
   const finalized = [redactedPptxCandidate, redactedPdfCandidate, redactedJsonCandidate].some(
     (value) => typeof value === "string" && value.trim().length > 0,
   );
 
+  const generatedThumb = finalized ? buildSlideImageUrl(deckId, 1, rawThumb) : undefined;
   const thumbnailUrl = finalized
-    ? buildSlideImageUrl(deckId, 1, providedThumb)
+    ? resolveAssetUrl(generatedThumb)
     : providedThumb;
 
   const pdfUrl = typeof pdfCandidate === "string"
@@ -1199,19 +1249,452 @@ function DeckThumbnailSkeleton() {
   );
 }
 
+function useLibraryDecks(limit = 60) {
+  const [decks, setDecks] = useState<LibraryDeck[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/decks?limit=${limit}`);
+        if (!res.ok) {
+          throw new Error(`deck request failed: ${res.status}`);
+        }
+        const payload = await res.json();
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.decks)
+            ? payload.decks
+            : [];
+        const normalized = list
+          .map((item: any) => normalizeDeckRecord(item))
+          .filter(Boolean) as DeckPreview[];
+        const enriched = normalized.map(enrichDeckForLibrary);
+        if (!cancelled) {
+          setDecks(enriched);
+        }
+      } catch (err) {
+        console.error("Failed to load library decks", err);
+        if (!cancelled) {
+          const enrichedFallback = FALLBACK_DECKS.map(enrichDeckForLibrary);
+          setDecks(enrichedFallback);
+          setError(err instanceof Error ? err.message : "Failed to load decks");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [limit, revision]);
+
+  const reload = useCallback(() => {
+    setRevision((value) => value + 1);
+  }, []);
+
+  return { decks, loading, error, reload };
+}
+
 function LibraryView() {
+  const { decks, loading, error, reload } = useLibraryDecks();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+
+  const filteredDecks = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return decks.filter((deck) => {
+      const industryMatch = selectedIndustries.length === 0 || selectedIndustries.includes(deck.industry);
+      const typeMatch = selectedTypes.length === 0 || selectedTypes.includes(deck.category);
+      const termMatch =
+        term.length === 0 ||
+        deck.title.toLowerCase().includes(term) ||
+        deck.summary.toLowerCase().includes(term);
+      return industryMatch && typeMatch && termMatch;
+    });
+  }, [decks, selectedIndustries, selectedTypes, searchTerm]);
+
+  const toggleIndustry = useCallback((value: string) => {
+    setSelectedIndustries((prev) =>
+      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value],
+    );
+  }, []);
+
+  const toggleType = useCallback((value: string) => {
+    setSelectedTypes((prev) =>
+      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value],
+    );
+  }, []);
+
   return (
     <div
       style={{
         height: "100%",
         display: "grid",
-        placeItems: "center",
-        color: "#6b7280",
-        fontSize: 16,
+        gridTemplateColumns: "260px 1fr",
+        minHeight: 0,
       }}
     >
-      Library space coming soon.
+      <aside
+        style={{
+          borderRight: "1px solid #e5e7eb",
+          background: "#ffffff",
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto",
+          padding: "24px 20px",
+          gap: 24,
+          minHeight: 0,
+        }}
+      >
+        <div style={{ display: "grid", gap: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>Filters</h2>
+          <div style={{ fontSize: 13, color: "#6b7280" }}>Narrow down decks by industry, type, or keywords.</div>
+        </div>
+
+        <div style={{ display: "grid", gap: 24, overflowY: "auto" }}>
+          <FilterSection
+            title="Industry"
+            options={LIBRARY_INDUSTRIES}
+            selected={selectedIndustries}
+            onToggle={toggleIndustry}
+          />
+          <FilterSection
+            title="Deck type"
+            options={LIBRARY_TYPES}
+            selected={selectedTypes}
+            onToggle={toggleType}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={reload}
+          style={{
+            border: "1px solid #111827",
+            background: "#111827",
+            color: "#fff",
+            borderRadius: 999,
+            padding: "10px 18px",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Apply
+        </button>
+      </aside>
+
+      <main
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr",
+          minHeight: 0,
+          padding: "24px 28px",
+          gap: 24,
+          background: "#f9fafb",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "grid", gap: 4 }}>
+            <h1 style={{ margin: 0, fontSize: 24, color: "#0f172a" }}>Deck library</h1>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              {loading ? "Loading decks…" : `${filteredDecks.length} deck${filteredDecks.length === 1 ? "" : "s"} found.`}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search decks"
+              style={{
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                padding: "10px 16px",
+                fontSize: 14,
+                minWidth: 220,
+                background: "#ffffff",
+              }}
+            />
+            <button
+              type="button"
+              onClick={reload}
+              style={{
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                color: "#1f2937",
+                borderRadius: 999,
+                padding: "10px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div style={{ overflow: "hidden" }}>
+          <div style={{ height: "100%", overflowY: "auto" }}>
+            {error && (
+              <div style={{ marginBottom: 16, color: "#b91c1c", fontSize: 13 }}>{error}</div>
+            )}
+
+            {loading ? (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 32,
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  alignContent: "start",
+                  padding: "0 16px 32px",
+                  margin: "0 auto",
+                  width: "100%",
+                  maxWidth: 1080,
+                  boxSizing: "border-box",
+                }}
+              >
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <LibraryDeckSkeleton key={index} />
+                ))}
+              </div>
+            ) : filteredDecks.length === 0 ? (
+              <EmptyState message="No decks match the current filters." />
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 32,
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  alignContent: "start",
+                  padding: "0 16px 32px",
+                  margin: "0 auto",
+                  width: "100%",
+                  maxWidth: 1080,
+                  boxSizing: "border-box",
+                }}
+              >
+                {filteredDecks.map((deck) => (
+                  <LibraryDeckCard key={deck.id} deck={deck} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
     </div>
+  );
+}
+
+function FilterSection({
+  title,
+  options,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  options: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <section style={{ display: "grid", gap: 10 }}>
+      <h3 style={{ margin: 0, fontSize: 15, color: "#111827" }}>{title}</h3>
+      <div style={{ display: "grid", gap: 8 }}>
+        {options.map((option) => {
+          const id = `${title}-${option}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          const active = selected.includes(option);
+          return (
+            <label
+              key={option}
+              htmlFor={id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                color: active ? "#1d4ed8" : "#334155",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                id={id}
+                type="checkbox"
+                checked={active}
+                onChange={() => onToggle(option)}
+                style={{ width: 16, height: 16, accentColor: "#1d4ed8" }}
+              />
+              {option}
+            </label>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function LibraryDeckCard({ deck }: { deck: LibraryDeck }) {
+  const previewSrc =
+    resolveAssetUrl(deck.coverThumbnailUrl)
+    ?? resolveAssetUrl(deck.thumbnailUrl)
+    ?? resolveAssetUrl(buildSlideImageUrl(deck.id, 1));
+  const initials = deck.title
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1).toUpperCase())
+    .join("") || "DX";
+  const updated = formatRelativeDate(deck.updatedAt);
+  const summary = deck.summary.length > 160 ? `${deck.summary.slice(0, 157)}…` : deck.summary;
+
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 12,
+        background: "#ffffff",
+        borderRadius: 16,
+        border: "1px solid #e2e8f0",
+        boxShadow: "0 12px 30px rgba(15,23,42,0.08)",
+        padding: 16,
+        width: "90%",
+        maxWidth: 320,
+        margin: "0 auto 8px",
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "16 / 9",
+          borderRadius: 12,
+          overflow: "hidden",
+          background: "linear-gradient(135deg, #e0e7ff, #f3f4f6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {previewSrc ? (
+          <img
+            src={previewSrc}
+            alt={`${deck.title} preview`}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+          />
+        ) : (
+          <span style={{ fontSize: 28, fontWeight: 700, color: "#4338ca", letterSpacing: 0.8 }}>{initials}</span>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 17, color: "#0f172a" }}>{deck.title}</h3>
+          {updated && <span style={{ fontSize: 11, color: "#94a3b8" }}>Updated {updated}</span>}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "#1d4ed8",
+              background: "#e0ecff",
+              padding: "4px 8px",
+              borderRadius: 999,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            {deck.industry}
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "#0f172a",
+              background: "#e5e7eb",
+              padding: "4px 8px",
+              borderRadius: 999,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            {deck.category}
+          </span>
+          {typeof deck.slideCount === "number" && Number.isFinite(deck.slideCount) && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#1f2937",
+                background: "#f3f4f6",
+                padding: "4px 8px",
+                borderRadius: 999,
+                letterSpacing: 0.5,
+              }}
+            >
+              {deck.slideCount} slides
+            </span>
+          )}
+        </div>
+
+        <p style={{ margin: 0, fontSize: 13, color: "#475569", lineHeight: 1.6 }}>{summary}</p>
+      </div>
+    </article>
+  );
+}
+
+function LibraryDeckSkeleton() {
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 12,
+        background: "#ffffff",
+        borderRadius: 16,
+        border: "1px solid #e2e8f0",
+        padding: 16,
+        boxShadow: "0 12px 30px rgba(15,23,42,0.05)",
+        width: "90%",
+        maxWidth: 320,
+        margin: "0 auto 8px",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          aspectRatio: "16 / 9",
+          borderRadius: 12,
+          background: "linear-gradient(135deg, #e2e8f0, #f1f5f9)",
+        }}
+      />
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ height: 14, background: "#e2e8f0", borderRadius: 999 }} />
+        <div style={{ height: 12, background: "#f1f5f9", borderRadius: 999, width: "60%" }} />
+        <div style={{ height: 44, background: "#f1f5f9", borderRadius: 12 }} />
+      </div>
+    </article>
   );
 }
 
@@ -1451,10 +1934,7 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
 
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
-      <header style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
-        <h1 style={{ margin: 0, fontSize: 20 }}>Rule Builder</h1>
-      </header>
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr 220px", height: "100%", minHeight: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "240px 1fr 220px", height: "100%", minHeight: 0 }}>
         <aside
           style={{
             padding: "16px 16px 18px",
