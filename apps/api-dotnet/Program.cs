@@ -77,28 +77,7 @@ public static partial class Program
 
                 var deck = ExtractDeck(ms, file.FileName);
 
-                var resolver = new DefaultJsonTypeInfoResolver();
-                resolver.Modifiers.Add(info =>
-                {
-                    if (info.Type == typeof(ElementDto))
-                    {
-                        info.PolymorphismOptions = new JsonPolymorphismOptions
-                        {
-                            TypeDiscriminatorPropertyName = "type",
-                            IgnoreUnrecognizedTypeDiscriminators = true
-                        };
-                        info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(TextboxDto), "textbox"));
-                        info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(PictureDto), "picture"));
-                        info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(TableDto), "table"));
-                    }
-                });
-
-                var jsonOptions = new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    WriteIndented = true,
-                    TypeInfoResolver = resolver
-                };
+                var jsonOptions = CreateDeckJsonOptions();
 
                 var supabaseSettings = ReadSupabaseSettings(app.Configuration);
                 if (supabaseSettings is null)
@@ -111,10 +90,9 @@ public static partial class Program
 
                 var deckId = Guid.NewGuid();
 
-                var artifacts = await PersistArtifactsAsync(
+                var artifacts = await GenerateInitialArtifactsAsync(
                     ms,
                     deck,
-                    jsonOptions,
                     file.FileName,
                     deckId,
                     supabaseSettings,
@@ -128,7 +106,7 @@ public static partial class Program
 
                 try
                 {
-                    await PersistDeckToSupabaseAsync(
+                    await InsertDeckRecordAsync(
                         deck,
                         deckId,
                         artifacts,
@@ -233,7 +211,7 @@ public static partial class Program
 
             var query = new Dictionary<string, string?>
             {
-                ["select"] = "id,deck_name,original_filename,pdf_path,json_path,slide_count,created_at,updated_at",
+                ["select"] = "id,deck_name,pptx_path,redacted_pptx_path,redacted_pdf_path,redacted_json_path,slide_count,created_at,updated_at",
                 ["order"] = "created_at.desc",
                 ["limit"] = limit.ToString()
             };
@@ -324,49 +302,90 @@ public static partial class Program
                 redactedBytes = originalPptx;
             }
 
+            var jsonOptions = CreateDeckJsonOptions();
+
             var originalPath = NormalizeStoragePath(deckRecord.PptxPath!);
-            var directory = GetStorageDirectory(originalPath);
             var originalFileName = Path.GetFileNameWithoutExtension(originalPath);
-            var redactedFileName = string.IsNullOrWhiteSpace(originalFileName)
-                ? $"{deckId.ToString("n")}-redacted.pptx"
-                : $"{originalFileName}-redacted.pptx";
-            var redactedPath = string.IsNullOrEmpty(directory)
-                ? redactedFileName
-                : $"{directory}/{redactedFileName}";
+            var redactedBaseName = string.IsNullOrWhiteSpace(originalFileName)
+                ? $"{deckId.ToString("n")}-redacted"
+                : $"{originalFileName}-redacted";
+
+            var tempRoot = Path.Combine(Path.GetTempPath(), "dexter-redacted", Guid.NewGuid().ToString("n"));
+            Directory.CreateDirectory(tempRoot);
 
             try
             {
-                await UploadBytesToSupabaseStorageAsync(
-                    redactedBytes,
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                var redactedLocalPptx = Path.Combine(tempRoot, $"{redactedBaseName}.pptx");
+                await File.WriteAllBytesAsync(redactedLocalPptx, redactedBytes, cancellationToken);
+
+                await using var redactedStream = new MemoryStream(redactedBytes, writable: false);
+                var redactedDeck = ExtractDeck(redactedStream, Path.GetFileName(deckRecord.PptxPath) ?? $"{redactedBaseName}.pptx");
+
+                var redactedArtifacts = await PersistRedactedArtifactsAsync(
+                    redactedLocalPptx,
+                    redactedDeck,
+                    redactedBaseName,
+                    deckId,
                     settings,
-                    redactedPath,
+                    jsonOptions,
                     cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem($"Failed to upload redacted deck: {ex.Message}", statusCode: 500);
-            }
 
-            string? signedUrl = null;
-            try
-            {
-                signedUrl = await CreateSupabaseSignedUrlAsync(settings, redactedPath, 3600, cancellationToken);
-            }
-            catch
-            {
-                signedUrl = null;
-            }
+                try
+                {
+                    await DeleteSlidesForDeckAsync(deckId, settings, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Slide cleanup failed: {ex.Message}");
+                }
 
-            return Results.Json(new
+                await ReplaceSlideEmbeddingsAsync(
+                    redactedDeck,
+                    deckId,
+                    redactedArtifacts.ImageCaptions,
+                    settings,
+                    cancellationToken);
+
+                try
+                {
+                    await UpdateDeckWithRedactedArtifactsAsync(
+                        deckId,
+                        redactedArtifacts.PptxPath,
+                        redactedArtifacts.PdfPath,
+                        redactedArtifacts.JsonPath,
+                        redactedDeck.slideCount,
+                        settings,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return Results.Problem($"Failed to update deck record: {ex.Message}", statusCode: 500);
+                }
+
+                string? signedUrl = null;
+                try
+                {
+                    signedUrl = await CreateSupabaseSignedUrlAsync(settings, redactedArtifacts.PptxPath, 3600, cancellationToken);
+                }
+                catch
+                {
+                    signedUrl = null;
+                }
+
+                return Results.Json(new
+                {
+                    success = true,
+                    actionsApplied = appliedCount,
+                    path = redactedArtifacts.PptxPath,
+                    fileName = Path.GetFileName(redactedArtifacts.PptxPath),
+                    downloadUrl = signedUrl,
+                    generated = ruleActions.Count > 0
+                });
+            }
+            finally
             {
-                success = true,
-                actionsApplied = appliedCount,
-                path = redactedPath,
-                fileName = Path.GetFileName(redactedPath),
-                downloadUrl = signedUrl,
-                generated = ruleActions.Count > 0
-            });
+                try { Directory.Delete(tempRoot, recursive: true); } catch { /* ignore */ }
+            }
         });
 
         app.MapGet("/api/decks/{deckId:guid}/slides/{slideNo:int}", async (Guid deckId, int slideNo, HttpRequest request, CancellationToken cancellationToken) =>
@@ -391,13 +410,13 @@ public static partial class Program
                 }
             }
 
-            var pdfInfo = await FetchDeckPdfInfoAsync(deckId, settings, cancellationToken);
-            if (string.IsNullOrWhiteSpace(pdfInfo.PdfPath))
+            var pdfPath = await FetchDeckPdfInfoAsync(deckId, settings, cancellationToken);
+            if (string.IsNullOrWhiteSpace(pdfPath))
             {
                 return Results.NotFound(new { error = "Deck PDF not found" });
             }
 
-            var pdfBytes = await DownloadSupabaseObjectAsync(settings, pdfInfo.PdfPath!, cancellationToken);
+            var pdfBytes = await DownloadSupabaseObjectAsync(settings, pdfPath!, cancellationToken);
             if (pdfBytes is null || pdfBytes.Length == 0)
             {
                 return Results.NotFound(new { error = "Unable to download deck PDF" });
@@ -479,10 +498,9 @@ public static partial class Program
         await app.RunAsync();
     }
 
-    private static async Task<DeckArtifactUploadResult> PersistArtifactsAsync(
+    private static async Task<InitialDeckArtifacts> GenerateInitialArtifactsAsync(
         Stream pptxStream,
         DeckDto deck,
-        JsonSerializerOptions jsonOptions,
         string originalFileName,
         Guid deckId,
         SupabaseSettings settings,
@@ -493,7 +511,6 @@ public static partial class Program
         Directory.CreateDirectory(tempRoot);
 
         var pptxPath = Path.Combine(tempRoot, $"{baseName}.pptx");
-        var jsonPath = Path.Combine(tempRoot, $"{baseName}.json");
         var pdfPath = Path.Combine(tempRoot, $"{baseName}.pdf");
 
         try
@@ -538,9 +555,6 @@ public static partial class Program
                 settings,
                 cancellationToken);
 
-            var deckJson = JsonSerializer.Serialize(deck, jsonOptions);
-            await File.WriteAllTextAsync(jsonPath, deckJson, cancellationToken);
-
             var deckFolder = deckId.ToString("n");
             var objectPrefix = string.IsNullOrWhiteSpace(settings.StoragePathPrefix)
                 ? deckFolder
@@ -553,27 +567,11 @@ public static partial class Program
                 $"{objectPrefix}/{Path.GetFileName(pptxPath)}",
                 cancellationToken);
 
-            var jsonObjectPath = await UploadToSupabaseStorageAsync(
-                jsonPath,
-                "application/json",
-                settings,
-                $"{objectPrefix}/{Path.GetFileName(jsonPath)}",
-                cancellationToken);
-
-            var pdfObjectPath = await UploadToSupabaseStorageAsync(
-                pdfPath,
-                "application/pdf",
-                settings,
-                $"{objectPrefix}/{Path.GetFileName(pdfPath)}",
-                cancellationToken);
-
             pptxStream.Position = 0;
 
-            return new DeckArtifactUploadResult(
+            return new InitialDeckArtifacts(
                 BaseName: baseName,
                 PptxStoragePath: pptxObjectPath,
-                JsonStoragePath: jsonObjectPath,
-                PdfStoragePath: pdfObjectPath,
                 PdfFileName: Path.GetFileName(pdfPath),
                 PdfBytes: pdfBytes,
                 ImageCaptions: imageCaptions);
@@ -582,6 +580,32 @@ public static partial class Program
         {
             try { Directory.Delete(tempRoot, recursive: true); } catch { /* ignore */ }
         }
+    }
+
+    private static JsonSerializerOptions CreateDeckJsonOptions()
+    {
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(info =>
+        {
+            if (info.Type == typeof(ElementDto))
+            {
+                info.PolymorphismOptions = new JsonPolymorphismOptions
+                {
+                    TypeDiscriminatorPropertyName = "type",
+                    IgnoreUnrecognizedTypeDiscriminators = true
+                };
+                info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(TextboxDto), "textbox"));
+                info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(PictureDto), "picture"));
+                info.PolymorphismOptions.DerivedTypes.Add(new JsonDerivedType(typeof(TableDto), "table"));
+            }
+        });
+
+        return new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            TypeInfoResolver = resolver
+        };
     }
 
     private static SupabaseSettings? ReadSupabaseSettings(IConfiguration configuration)
@@ -617,10 +641,10 @@ public static partial class Program
             VisionModel: visionModel);
     }
 
-    private static async Task PersistDeckToSupabaseAsync(
+    private static async Task InsertDeckRecordAsync(
         DeckDto deck,
         Guid deckId,
-        DeckArtifactUploadResult artifacts,
+        InitialDeckArtifacts artifacts,
         SupabaseSettings settings,
         CancellationToken cancellationToken)
     {
@@ -630,10 +654,7 @@ public static partial class Program
         {
             id = deckId,
             deck_name = artifacts.BaseName,
-            original_filename = deck.file,
             pptx_path = artifacts.PptxStoragePath,
-            json_path = artifacts.JsonStoragePath,
-            pdf_path = artifacts.PdfStoragePath,
             slide_count = deck.slideCount,
             created_at = now,
             updated_at = now
@@ -641,11 +662,122 @@ public static partial class Program
 
         await PostgrestInsertAsync(settings, settings.DecksTable, deckRecord, returnRepresentation: false, cancellationToken);
 
+        // No slide embeddings at upload time; they will be created once the redacted deck is finalized.
+    }
+
+    private static async Task<RedactedArtifacts> PersistRedactedArtifactsAsync(
+        string localPptxPath,
+        DeckDto deck,
+        string baseName,
+        Guid deckId,
+        SupabaseSettings settings,
+        JsonSerializerOptions jsonOptions,
+        CancellationToken cancellationToken)
+    {
+        var tempDir = Path.GetDirectoryName(localPptxPath)!;
+        var deckFolder = deckId.ToString("n");
+        var objectPrefix = string.IsNullOrWhiteSpace(settings.StoragePathPrefix)
+            ? deckFolder
+            : $"{settings.StoragePathPrefix.TrimEnd('/')}/{deckFolder}";
+
+        var pptxObjectPath = await UploadToSupabaseStorageAsync(
+            localPptxPath,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            settings,
+            $"{objectPrefix}/{Path.GetFileName(localPptxPath)}",
+            cancellationToken);
+
+        await ConvertPptxToPdfAsync(localPptxPath, tempDir);
+
+        var pdfPath = Path.Combine(tempDir, $"{baseName}.pdf");
+        if (!File.Exists(pdfPath))
+        {
+            var generated = Directory.GetFiles(tempDir, "*.pdf").FirstOrDefault();
+            if (generated != null)
+            {
+                if (File.Exists(pdfPath))
+                {
+                    File.Delete(pdfPath);
+                }
+                File.Move(generated, pdfPath);
+            }
+        }
+
+        if (!File.Exists(pdfPath))
+        {
+            throw new InvalidOperationException("Redacted PDF conversion failed (no output file).");
+        }
+
+        var imageCaptions = await GenerateImageCaptionsAsync(
+            deck,
+            localPptxPath,
+            deckId,
+            settings,
+            cancellationToken);
+
+        await GenerateTableSummariesAsync(
+            deck,
+            settings,
+            cancellationToken);
+
+        var pdfObjectPath = await UploadToSupabaseStorageAsync(
+            pdfPath,
+            "application/pdf",
+            settings,
+            $"{objectPrefix}/{Path.GetFileName(pdfPath)}",
+            cancellationToken);
+
+        var jsonTempPath = Path.Combine(tempDir, $"{baseName}.json");
+        var deckJson = JsonSerializer.Serialize(deck, jsonOptions);
+        await File.WriteAllTextAsync(jsonTempPath, deckJson, cancellationToken);
+
+        var jsonObjectPath = await UploadToSupabaseStorageAsync(
+            jsonTempPath,
+            "application/json",
+            settings,
+            $"{objectPrefix}/{Path.GetFileName(jsonTempPath)}",
+            cancellationToken);
+
+        return new RedactedArtifacts(
+            PptxPath: pptxObjectPath,
+            PdfPath: pdfObjectPath,
+            JsonPath: jsonObjectPath,
+            ImageCaptions: imageCaptions);
+    }
+
+    private static async Task DeleteSlidesForDeckAsync(
+        Guid deckId,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = $"{settings.Url}/rest/v1/{settings.SlidesTable}?deck_id=eq.{deckId}";
+        using var request = new HttpRequestMessage(HttpMethod.Delete, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Add("Prefer", "return=minimal");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.NotFound)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase slide delete failed ({(int)response.StatusCode}): {body}");
+        }
+    }
+
+    private static async Task ReplaceSlideEmbeddingsAsync(
+        DeckDto deck,
+        Guid deckId,
+        Dictionary<int, List<string>> imageCaptions,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
         var slidePayload = new List<object>();
+
         foreach (var slide in deck.slides)
         {
             var text = ExtractSlidePlainText(slide);
-            var captions = artifacts.ImageCaptions.TryGetValue(slide.index, out var captionList) ? captionList : null;
+            var captions = imageCaptions.TryGetValue(slide.index, out var captionList) ? captionList : null;
             var tableSummaries = slide.elements
                 .OfType<TableDto>()
                 .Select(t => t.summary)
@@ -675,6 +807,39 @@ public static partial class Program
         if (slidePayload.Count > 0)
         {
             await PostgrestInsertAsync(settings, settings.SlidesTable, slidePayload, returnRepresentation: false, cancellationToken);
+        }
+    }
+
+    private static async Task UpdateDeckWithRedactedArtifactsAsync(
+        Guid deckId,
+        string redactedPptxPath,
+        string redactedPdfPath,
+        string redactedJsonPath,
+        int slideCount,
+        SupabaseSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var payload = new
+        {
+            redacted_pptx_path = redactedPptxPath,
+            redacted_pdf_path = redactedPdfPath,
+            redacted_json_path = redactedJsonPath,
+            slide_count = slideCount,
+            updated_at = DateTime.UtcNow
+        };
+
+        var requestUri = $"{settings.Url}/rest/v1/{settings.DecksTable}?id=eq.{deckId}";
+        using var request = new HttpRequestMessage(HttpMethod.Patch, requestUri);
+        request.Headers.Add("apikey", settings.ServiceKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
+        request.Headers.Add("Prefer", "return=minimal");
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new Exception($"Supabase deck update failed ({(int)response.StatusCode}): {body}");
         }
     }
 
@@ -770,14 +935,14 @@ public static partial class Program
         return normalized.Substring(0, lastSlash);
     }
 
-    private static async Task<(string? PdfPath, string? PdfUrl)> FetchDeckPdfInfoAsync(
+    private static async Task<string?> FetchDeckPdfInfoAsync(
         Guid deckId,
         SupabaseSettings settings,
         CancellationToken cancellationToken)
     {
         var query = new Dictionary<string, string?>
         {
-            ["select"] = "pdf_path",
+            ["select"] = "redacted_pdf_path",
             ["id"] = $"eq.{deckId}",
             ["limit"] = "1"
         };
@@ -791,22 +956,22 @@ public static partial class Program
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            return (null, null);
+            return null;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
         {
-            return (null, null);
+            return null;
         }
 
         var first = doc.RootElement[0];
-        var pdfPath = first.TryGetProperty("pdf_path", out var pdfPathElement) && pdfPathElement.ValueKind == JsonValueKind.String
+        var pdfPath = first.TryGetProperty("redacted_pdf_path", out var pdfPathElement) && pdfPathElement.ValueKind == JsonValueKind.String
             ? pdfPathElement.GetString()
             : null;
 
-        return (pdfPath, null);
+        return pdfPath;
     }
 
     private static async Task<DeckRecord?> FetchDeckRecordAsync(
@@ -816,7 +981,7 @@ public static partial class Program
     {
         var query = new Dictionary<string, string?>
         {
-            ["select"] = "id,deck_name,pptx_path,json_path,pdf_path",
+            ["select"] = "id,deck_name,pptx_path,redacted_pptx_path,redacted_pdf_path,redacted_json_path,slide_count",
             ["id"] = $"eq.{deckId}",
             ["limit"] = "1"
         };
@@ -854,8 +1019,10 @@ public static partial class Program
             Id = id,
             DeckName = first.TryGetProperty("deck_name", out var deckNameElement) && deckNameElement.ValueKind == JsonValueKind.String ? deckNameElement.GetString() : null,
             PptxPath = first.TryGetProperty("pptx_path", out var pptxElement) && pptxElement.ValueKind == JsonValueKind.String ? pptxElement.GetString() : null,
-            JsonPath = first.TryGetProperty("json_path", out var jsonElement) && jsonElement.ValueKind == JsonValueKind.String ? jsonElement.GetString() : null,
-            PdfPath = first.TryGetProperty("pdf_path", out var pdfElement) && pdfElement.ValueKind == JsonValueKind.String ? pdfElement.GetString() : null
+            RedactedPptxPath = first.TryGetProperty("redacted_pptx_path", out var redPptxElement) && redPptxElement.ValueKind == JsonValueKind.String ? redPptxElement.GetString() : null,
+            RedactedPdfPath = first.TryGetProperty("redacted_pdf_path", out var redPdfElement) && redPdfElement.ValueKind == JsonValueKind.String ? redPdfElement.GetString() : null,
+            RedactedJsonPath = first.TryGetProperty("redacted_json_path", out var redJsonElement) && redJsonElement.ValueKind == JsonValueKind.String ? redJsonElement.GetString() : null,
+            SlideCount = first.TryGetProperty("slide_count", out var slideCountElement) && slideCountElement.ValueKind == JsonValueKind.Number ? slideCountElement.GetInt32() : (int?)null
         };
     }
 
@@ -1298,8 +1465,10 @@ public static partial class Program
         public Guid Id { get; init; }
         public string? DeckName { get; init; }
         public string? PptxPath { get; init; }
-        public string? JsonPath { get; init; }
-        public string? PdfPath { get; init; }
+        public string? RedactedPptxPath { get; init; }
+        public string? RedactedPdfPath { get; init; }
+        public string? RedactedJsonPath { get; init; }
+        public int? SlideCount { get; init; }
     }
 
     private sealed class RuleActionRecord
@@ -1904,13 +2073,17 @@ public static partial class Program
         return vector?.ToArray();
     }
 
-    private sealed record DeckArtifactUploadResult(
+    private sealed record InitialDeckArtifacts(
         string BaseName,
         string PptxStoragePath,
-        string JsonStoragePath,
-        string PdfStoragePath,
         string PdfFileName,
         byte[] PdfBytes,
+        Dictionary<int, List<string>> ImageCaptions);
+
+    private sealed record RedactedArtifacts(
+        string PptxPath,
+        string PdfPath,
+        string JsonPath,
         Dictionary<int, List<string>> ImageCaptions);
 
     private sealed record SupabaseSettings(

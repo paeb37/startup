@@ -56,13 +56,13 @@ def fetch_deck_json(deck_id: str) -> Dict[str, Any]:
     config = load_supabase_config()
     supabase = _get_supabase_client(config)
 
-    response = supabase.table(config.decks_table).select("id,json_path").eq("id", deck_id).limit(1).execute()
+    response = supabase.table(config.decks_table).select("id,redacted_json_path").eq("id", deck_id).limit(1).execute()
     if not response.data:
         raise KeyError(f"deck_id '{deck_id}' not found")
 
-    json_path = response.data[0].get("json_path")
+    json_path = response.data[0].get("redacted_json_path")
     if not json_path:
-        raise KeyError(f"deck_id '{deck_id}' missing json_path")
+        raise KeyError(f"deck_id '{deck_id}' missing redacted_json_path")
 
     file_bytes = supabase.storage.from_(config.storage_bucket).download(json_path)
     try:

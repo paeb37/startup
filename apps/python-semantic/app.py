@@ -336,7 +336,7 @@ def fetch_decks(deck_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_DECKS_TABLE}"
     params = {
         "id": f"in.({ids_param})",
-        "select": "id,deck_name,original_filename,json_path"
+        "select": "id,deck_name,redacted_json_path"
     }
 
     try:
@@ -363,11 +363,11 @@ def fetch_decks(deck_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     return {row.get("id"): row for row in rows if row.get("id")}
 
 
-def download_deck_json(json_path: str) -> Optional[Dict[str, Any]]:
-    if not json_path:
+def download_deck_json(storage_path: str) -> Optional[Dict[str, Any]]:
+    if not storage_path:
         return None
 
-    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{json_path.strip('/')}"
+    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{storage_path.strip('/')}"
     try:
         response = _supabase_session.get(
             url,
@@ -385,13 +385,26 @@ def download_deck_json(json_path: str) -> Optional[Dict[str, Any]]:
     try:
         return response.json()
     except ValueError:
-        logging.error("Invalid JSON body for deck %s", json_path)
+        logging.error("Invalid JSON body for deck %s", storage_path)
         return None
 
 
 def build_slide_image_url(deck_id: str, slide_no: int) -> str:
     base = (SLIDE_IMAGE_BASE or "").rstrip("/")
     return f"{base}/api/decks/{deck_id}/slides/{slide_no}"
+
+
+def infer_deck_name(*paths: Optional[str]) -> Optional[str]:
+    for candidate in paths:
+        if not candidate or not isinstance(candidate, str):
+            continue
+        cleaned = candidate.strip().strip("/")
+        if not cleaned:
+            continue
+        stem = os.path.splitext(os.path.basename(cleaned))[0]
+        if stem:
+            return stem
+    return None
 
 
 def extract_slide_text(slide: Dict[str, Any]) -> str:
@@ -449,7 +462,7 @@ def build_context_from_matches(matches: List[Dict[str, Any]], max_contexts: int 
             continue
 
         if deck_id not in deck_json_cache:
-            deck_data = download_deck_json(deck_row.get("json_path", ""))
+            deck_data = download_deck_json(deck_row.get("redacted_json_path", ""))
             deck_json_cache[deck_id] = deck_data
         else:
             deck_data = deck_json_cache[deck_id]
@@ -482,7 +495,14 @@ def build_context_from_matches(matches: List[Dict[str, Any]], max_contexts: int 
         if not slide_text:
             continue
 
-        deck_name = deck_row.get("deck_name") or deck_row.get("original_filename") or deck_id
+        deck_name = (
+            deck_row.get("deck_name")
+            or infer_deck_name(
+                deck_row.get("redacted_pptx_path"),
+                deck_row.get("pptx_path"),
+            )
+            or deck_id
+        )
         similarity = match.get("similarity") or match.get("score")
         human_slide_no = slide_index + 1
 

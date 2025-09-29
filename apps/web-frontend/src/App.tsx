@@ -64,6 +64,12 @@ type DeckPreview = {
   pdfUrl?: string;
   pdfPath?: string;
   updatedAt?: string;
+  pptxPath?: string;
+  redactedPptxPath?: string;
+  redactedPdfPath?: string;
+  redactedJsonPath?: string;
+  slideCount?: number;
+  finalized?: boolean;
 };
 
 type SlideReference = {
@@ -395,32 +401,80 @@ function formatRelativeDate(iso?: string) {
 
 function normalizeDeckRecord(raw: any): DeckPreview | null {
   if (!raw || typeof raw !== "object") return null;
-  const id = raw.id ?? raw.deckId ?? raw.deck_id ?? raw.uuid ?? raw.slug;
-  const title = raw.deck_name ?? raw.deckName ?? raw.title ?? raw.name ?? raw.original_filename;
-  const pdfCandidate = raw.pdfUrl ?? raw.pdf_url ?? raw.pdf ?? raw.pdfPath ?? raw.pdf_path;
+
+  const rawId = raw.id ?? raw.deckId ?? raw.deck_id ?? raw.uuid ?? raw.slug;
+  const deckId = rawId != null ? String(rawId) : undefined;
+
+  const pptxCandidate = raw.pptx_path ?? raw.pptxPath ?? raw.original_path;
+  const redactedPptxCandidate = raw.redacted_pptx_path ?? raw.redactedPptxPath;
+  const redactedPdfCandidate = raw.redacted_pdf_url ?? raw.redacted_pdf_path ?? raw.redactedPdfUrl ?? raw.redactedPdfPath;
+  const redactedJsonCandidate = raw.redacted_json_path ?? raw.redactedJsonPath;
+
+  const pdfCandidate = redactedPdfCandidate
+    ?? raw.pdfUrl
+    ?? raw.pdf_url
+    ?? raw.pdf
+    ?? raw.pdfPath
+    ?? raw.pdf_path;
+
   const thumbnailCandidate =
-    raw.cover_thumbnail_url ??
-    raw.coverThumbnailUrl ??
-    raw.thumbnailUrl ??
-    raw.thumbnail_url ??
-    raw.preview_url ??
-    raw.cover_image ??
-    raw.cover;
+    raw.cover_thumbnail_url
+    ?? raw.coverThumbnailUrl
+    ?? raw.thumbnailUrl
+    ?? raw.thumbnail_url
+    ?? raw.preview_url
+    ?? raw.cover_image
+    ?? raw.cover;
+
   const description = raw.description ?? raw.summary ?? raw.notes ?? undefined;
   const updated = raw.updatedAt ?? raw.updated_at ?? raw.modified_at ?? raw.modifiedAt ?? raw.created_at ?? raw.createdAt;
+
+  let slideCount: number | undefined;
+  const slideCandidates = [raw.slide_count, raw.slideCount];
+  for (const candidate of slideCandidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      slideCount = candidate;
+      break;
+    }
+    if (typeof candidate === "string") {
+      const parsed = Number.parseInt(candidate, 10);
+      if (!Number.isNaN(parsed)) {
+        slideCount = parsed;
+        break;
+      }
+    }
+  }
+
+  const providedThumb = typeof thumbnailCandidate === "string" && thumbnailCandidate.trim().length > 0
+    ? thumbnailCandidate
+    : undefined;
+
+  const finalized = [redactedPptxCandidate, redactedPdfCandidate, redactedJsonCandidate].some(
+    (value) => typeof value === "string" && value.trim().length > 0,
+  );
+
+  const thumbnailUrl = finalized
+    ? buildSlideImageUrl(deckId, 1, providedThumb)
+    : providedThumb;
 
   const pdfUrl = typeof pdfCandidate === "string"
     ? toPublicUrl(pdfCandidate) ?? (pdfCandidate.startsWith("data:") ? pdfCandidate : undefined)
     : undefined;
 
-  const thumbnailUrl = buildSlideImageUrl(id ? String(id) : undefined, 1, typeof thumbnailCandidate === "string" ? thumbnailCandidate : undefined);
+  const titleCandidate = raw.deck_name
+    ?? raw.deckName
+    ?? raw.title
+    ?? raw.name
+    ?? (typeof pptxCandidate === "string" ? inferDeckNameFromPath(pptxCandidate) : undefined);
 
-  const safeTitle = typeof title === "string" && title.trim().length > 0 ? title : "Untitled deck";
-  const safeId = id
-    ? String(id)
-    : typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+  const safeTitle = typeof titleCandidate === "string" && titleCandidate.trim().length > 0
+    ? titleCandidate.trim()
+    : deckId ?? "Untitled deck";
+
+  const safeId = deckId
+    ?? (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2);
+      : Math.random().toString(36).slice(2));
 
   return {
     id: safeId,
@@ -429,9 +483,25 @@ function normalizeDeckRecord(raw: any): DeckPreview | null {
     pdfUrl,
     pdfPath: typeof pdfCandidate === "string" ? pdfCandidate : undefined,
     thumbnailUrl,
-    coverThumbnailUrl: thumbnailUrl,
+    coverThumbnailUrl: providedThumb ?? thumbnailUrl,
     updatedAt: typeof updated === "string" ? updated : undefined,
+    pptxPath: typeof pptxCandidate === "string" ? pptxCandidate : undefined,
+    redactedPptxPath: typeof redactedPptxCandidate === "string" ? redactedPptxCandidate : undefined,
+    redactedPdfPath: typeof redactedPdfCandidate === "string" ? redactedPdfCandidate : undefined,
+    redactedJsonPath: typeof redactedJsonCandidate === "string" ? redactedJsonCandidate : undefined,
+    slideCount,
+    finalized,
   };
+}
+
+function inferDeckNameFromPath(path: string): string | undefined {
+  if (!path) return undefined;
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0) return undefined;
+  const last = segments[segments.length - 1];
+  const dot = last.lastIndexOf(".");
+  const stem = dot >= 0 ? last.slice(0, dot) : last;
+  return stem.trim() || undefined;
 }
 
 function normalizeSlideReference(raw: any): SlideReference | null {
@@ -999,6 +1069,22 @@ function DeckThumbnailCard({ deck }: { deck: DeckPreview }) {
     .join("") || "DX";
   const updated = formatRelativeDate(deck.updatedAt);
 
+  const statusChip = deck.finalized
+    ? { label: "Redacted", fg: "#065f46", bg: "#d1fae5" }
+    : { label: "Awaiting redaction", fg: "#92400e", bg: "#fef3c7" };
+
+  const slideChip = typeof deck.slideCount === "number" && Number.isFinite(deck.slideCount)
+    ? {
+        label: `${deck.slideCount} slide${deck.slideCount === 1 ? "" : "s"}`,
+        fg: "#1f2937",
+        bg: "#e5e7eb",
+      }
+    : null;
+
+  const chips = slideChip ? [statusChip, slideChip] : [statusChip];
+
+  const externalPdfUrl = deck.pdfUrl;
+
   return (
     <article
       style={{
@@ -1038,7 +1124,38 @@ function DeckThumbnailCard({ deck }: { deck: DeckPreview }) {
       <div style={{ display: "grid", gap: 6 }}>
         <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a" }}>{deck.title}</div>
         {deck.description && <div style={{ fontSize: 13, color: "#64748b" }}>{deck.description}</div>}
+        {chips.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {chips.map((chip) => (
+              <span
+                key={chip.label}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: chip.fg,
+                  background: chip.bg,
+                  padding: "4px 8px",
+                  borderRadius: 999,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                }}
+              >
+                {chip.label}
+              </span>
+            ))}
+          </div>
+        )}
         {updated && <div style={{ fontSize: 12, color: "#9ca3af" }}>Updated {updated}</div>}
+        {externalPdfUrl && deck.finalized && (
+          <a
+            href={externalPdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 12, color: "#2563eb", fontWeight: 600, textDecoration: "none" }}
+          >
+            View redacted PDF
+          </a>
+        )}
       </div>
     </article>
   );
