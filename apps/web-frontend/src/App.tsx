@@ -1559,6 +1559,8 @@ function LibraryDeckCard({ deck }: { deck: LibraryDeck }) {
     resolveAssetUrl(deck.coverThumbnailUrl)
     ?? resolveAssetUrl(deck.thumbnailUrl)
     ?? resolveAssetUrl(buildSlideImageUrl(deck.id, 1));
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const initials = deck.title
     .split(/\s+/)
     .filter(Boolean)
@@ -1567,6 +1569,42 @@ function LibraryDeckCard({ deck }: { deck: LibraryDeck }) {
     .join("") || "DX";
   const updated = formatRelativeDate(deck.updatedAt);
   const summary = deck.summary.length > 160 ? `${deck.summary.slice(0, 157)}…` : deck.summary;
+  const downloadVariant = deck.finalized ? "redacted" : "original";
+
+  const handleDownload = useCallback(async () => {
+    if (downloading) return;
+    setDownloading(true);
+    setDownloadError(null);
+
+    try {
+      const response = await fetch(`/api/decks/${deck.id}/download?variant=${downloadVariant}`);
+      if (!response.ok) {
+        const message = await response.text().catch(() => "");
+        throw new Error(message || `Download failed (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const fileNameMatch = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+      const encodedName = fileNameMatch?.[1] ?? fileNameMatch?.[2] ?? `${deck.title || "deck"}.pptx`;
+      const decodedName = decodeURIComponent(encodedName);
+
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = decodedName;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Download failed";
+      setDownloadError(message);
+    } finally {
+      setDownloading(false);
+    }
+  }, [deck.id, deck.title, downloadVariant, downloading]);
 
   return (
     <article
@@ -1659,6 +1697,27 @@ function LibraryDeckCard({ deck }: { deck: LibraryDeck }) {
           )}
         </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading}
+            style={{
+              border: "1px solid #2563eb",
+              background: downloading ? "#e0ecff" : "#2563eb",
+              color: downloading ? "#1d4ed8" : "#fff",
+              borderRadius: 999,
+              padding: "8px 14px",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: downloading ? "wait" : "pointer",
+              transition: "background 0.2s ease",
+            }}
+          >
+            {downloading ? "Preparing…" : "Download deck"}
+          </button>
+        </div>
+        {downloadError && <div style={{ fontSize: 12, color: "#b91c1c" }}>{downloadError}</div>}
         <p style={{ margin: 0, fontSize: 13, color: "#475569", lineHeight: 1.6 }}>{summary}</p>
       </div>
     </article>

@@ -388,6 +388,103 @@ public static partial class Program
             }
         });
 
+        app.MapGet("/api/decks/{deckId:guid}/download", async (Guid deckId, HttpRequest request, CancellationToken cancellationToken) =>
+        {
+            var settings = ReadSupabaseSettings(app.Configuration);
+            if (settings is null)
+            {
+                return Results.Problem(
+                    detail: "Supabase storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
+                    statusCode: 500);
+            }
+
+            DeckRecord? deckRecord;
+            try
+            {
+                deckRecord = await FetchDeckRecordAsync(deckId, settings, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to load deck metadata: {ex.Message}", statusCode: 500);
+            }
+
+            if (deckRecord is null)
+            {
+                return Results.NotFound(new { error = "deck_not_found" });
+            }
+
+            var variantRaw = request.Query.TryGetValue("variant", out var variantValues)
+                ? variantValues.FirstOrDefault()
+                : null;
+
+            var variant = string.IsNullOrWhiteSpace(variantRaw)
+                ? "redacted"
+                : variantRaw!.Trim().ToLowerInvariant();
+
+            string? selectedPath = variant switch
+            {
+                "original" => deckRecord.PptxPath,
+                "pdf" => deckRecord.RedactedPdfPath ?? deckRecord.PptxPath,
+                "json" => deckRecord.RedactedJsonPath,
+                _ => deckRecord.RedactedPptxPath ?? deckRecord.PptxPath,
+            };
+
+            string resolvedVariant = variant switch
+            {
+                "original" => "original",
+                "pdf" => deckRecord.RedactedPdfPath != null ? "pdf" : "original",
+                "json" => "json",
+                _ => deckRecord.RedactedPptxPath != null ? "redacted" : "original",
+            };
+
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return Results.NotFound(new { error = "asset_missing", variant = resolvedVariant });
+            }
+
+            byte[]? fileBytes;
+            try
+            {
+                fileBytes = await DownloadSupabaseObjectAsync(settings, selectedPath, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to download deck: {ex.Message}", statusCode: 500);
+            }
+
+            if (fileBytes is null || fileBytes.Length == 0)
+            {
+                return Results.NotFound(new { error = "asset_not_found", variant = resolvedVariant });
+            }
+
+            var extension = Path.GetExtension(selectedPath)?.ToLowerInvariant() ?? string.Empty;
+            var contentType = extension switch
+            {
+                ".pdf" => "application/pdf",
+                ".json" => "application/json",
+                _ => "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            };
+
+            var fileName = Path.GetFileName(selectedPath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                var safeName = deckRecord.DeckName;
+                if (string.IsNullOrWhiteSpace(safeName))
+                {
+                    safeName = deckId.ToString("n");
+                }
+
+                fileName = resolvedVariant switch
+                {
+                    "pdf" => $"{safeName}.pdf",
+                    "json" => $"{safeName}.json",
+                    _ => $"{safeName}.pptx",
+                };
+            }
+
+            return Results.File(fileBytes, contentType, fileName);
+        });
+
         app.MapGet("/api/decks/{deckId:guid}/slides/{slideNo:int}", async (Guid deckId, int slideNo, HttpRequest request, CancellationToken cancellationToken) =>
         {
             if (slideNo < 1)
@@ -1428,6 +1525,11 @@ public static partial class Program
         CancellationToken cancellationToken)
     {
         var normalized = NormalizeStoragePath(objectPath);
+        var bucketPrefix = settings.StorageBucket.Trim('/');
+        if (!string.IsNullOrEmpty(bucketPrefix) && normalized.StartsWith(bucketPrefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized.Substring(bucketPrefix.Length + 1);
+        }
         var requestUri = $"{settings.Url}/storage/v1/object/sign/{settings.StorageBucket}/{normalized}";
 
         var payload = JsonSerializer.Serialize(new { expiresIn = expiresInSeconds });
@@ -1450,12 +1552,50 @@ public static partial class Program
         }
 
         var signedUrl = urlElement.GetString();
-        if (string.IsNullOrEmpty(signedUrl))
+        if (string.IsNullOrWhiteSpace(signedUrl))
         {
             return null;
         }
 
-        return settings.Url.TrimEnd('/') + signedUrl!;
+        if (Uri.TryCreate(signedUrl, UriKind.Absolute, out var absolute))
+        {
+            var path = absolute.AbsolutePath;
+            var query = absolute.Query.TrimStart('?');
+
+            if (!path.StartsWith("/storage/v1/", StringComparison.OrdinalIgnoreCase))
+            {
+                path = $"/storage/v1/{path.TrimStart('/')}";
+            }
+
+            var builder = new UriBuilder(settings.Url)
+            {
+                Path = path,
+                Query = query,
+            };
+            return builder.Uri.ToString();
+        }
+
+        var raw = signedUrl.Trim();
+        string rawPath = raw;
+        string rawQuery = string.Empty;
+        var questionIndex = raw.IndexOf('?');
+        if (questionIndex >= 0)
+        {
+            rawPath = raw[..questionIndex];
+            rawQuery = raw[(questionIndex + 1)..];
+        }
+
+        if (!rawPath.StartsWith("/storage/v1/", StringComparison.OrdinalIgnoreCase))
+        {
+            rawPath = $"/storage/v1/{rawPath.TrimStart('/')}";
+        }
+
+        var baseBuilder = new UriBuilder(settings.Url)
+        {
+            Path = rawPath,
+            Query = rawQuery,
+        };
+        return baseBuilder.Uri.ToString();
     }
 
     private sealed record ElementKeyInfo(string SlidePath, string ElementType, uint ElementId);
