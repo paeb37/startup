@@ -69,6 +69,16 @@ public static partial class Program
                 : null;
             instructions = string.IsNullOrWhiteSpace(instructions) ? null : instructions!.Trim();
 
+            var industry = form.TryGetValue("industry", out var industryValues)
+                ? industryValues.ToString()
+                : null;
+            industry = string.IsNullOrWhiteSpace(industry) ? null : industry!.Trim();
+
+            var deckType = form.TryGetValue("deckType", out var deckTypeValues)
+                ? deckTypeValues.ToString()
+                : null;
+            deckType = string.IsNullOrWhiteSpace(deckType) ? null : deckType!.Trim();
+
             try
             {
                 await using var ms = new MemoryStream();
@@ -110,6 +120,8 @@ public static partial class Program
                         deck,
                         deckId,
                         artifacts,
+                        industry,
+                        deckType,
                         supabaseSettings,
                         req.HttpContext.RequestAborted);
                 }
@@ -182,6 +194,8 @@ public static partial class Program
                 {
                     deckId,
                     deck,
+                    industry,
+                    deckType,
                     pdf = pdfInfo,
                     rule = ruleInfo,
                     instructions
@@ -211,7 +225,7 @@ public static partial class Program
 
             var query = new Dictionary<string, string?>
             {
-                ["select"] = "id,deck_name,pptx_path,redacted_pptx_path,redacted_pdf_path,redacted_json_path,slide_count,created_at,updated_at",
+                ["select"] = "id,deck_name,pptx_path,redacted_pptx_path,redacted_pdf_path,redacted_json_path,industry,deck_type,slide_count,created_at,updated_at",
                 ["order"] = "created_at.desc",
                 ["limit"] = limit.ToString()
             };
@@ -742,6 +756,8 @@ public static partial class Program
         DeckDto deck,
         Guid deckId,
         InitialDeckArtifacts artifacts,
+        string? industry,
+        string? deckType,
         SupabaseSettings settings,
         CancellationToken cancellationToken)
     {
@@ -752,6 +768,8 @@ public static partial class Program
             id = deckId,
             deck_name = artifacts.BaseName,
             pptx_path = artifacts.PptxStoragePath,
+            industry,
+            deck_type = deckType,
             slide_count = deck.slideCount,
             created_at = now,
             updated_at = now
@@ -1078,7 +1096,7 @@ public static partial class Program
     {
         var query = new Dictionary<string, string?>
         {
-            ["select"] = "id,deck_name,pptx_path,redacted_pptx_path,redacted_pdf_path,redacted_json_path,slide_count",
+            ["select"] = "id,deck_name,pptx_path,redacted_pptx_path,redacted_pdf_path,redacted_json_path,industry,deck_type,slide_count",
             ["id"] = $"eq.{deckId}",
             ["limit"] = "1"
         };
@@ -1119,6 +1137,8 @@ public static partial class Program
             RedactedPptxPath = first.TryGetProperty("redacted_pptx_path", out var redPptxElement) && redPptxElement.ValueKind == JsonValueKind.String ? redPptxElement.GetString() : null,
             RedactedPdfPath = first.TryGetProperty("redacted_pdf_path", out var redPdfElement) && redPdfElement.ValueKind == JsonValueKind.String ? redPdfElement.GetString() : null,
             RedactedJsonPath = first.TryGetProperty("redacted_json_path", out var redJsonElement) && redJsonElement.ValueKind == JsonValueKind.String ? redJsonElement.GetString() : null,
+            Industry = first.TryGetProperty("industry", out var industryElement) && industryElement.ValueKind == JsonValueKind.String ? industryElement.GetString() : null,
+            DeckType = first.TryGetProperty("deck_type", out var deckTypeElement) && deckTypeElement.ValueKind == JsonValueKind.String ? deckTypeElement.GetString() : null,
             SlideCount = first.TryGetProperty("slide_count", out var slideCountElement) && slideCountElement.ValueKind == JsonValueKind.Number ? slideCountElement.GetInt32() : (int?)null
         };
     }
@@ -1608,6 +1628,8 @@ public static partial class Program
         public string? RedactedPptxPath { get; init; }
         public string? RedactedPdfPath { get; init; }
         public string? RedactedJsonPath { get; init; }
+        public string? Industry { get; init; }
+        public string? DeckType { get; init; }
         public int? SlideCount { get; init; }
     }
 

@@ -70,6 +70,8 @@ type DeckPreview = {
   redactedJsonPath?: string;
   slideCount?: number;
   finalized?: boolean;
+  industry?: string | null;
+  deckType?: string | null;
 };
 
 type SlideReference = {
@@ -409,7 +411,7 @@ const FALLBACK_DECKS: DeckPreview[] = [
 
 type LibraryDeck = DeckPreview & {
   industry: string;
-  category: string;
+  deckType: string;
   summary: string;
 };
 
@@ -431,14 +433,16 @@ const LIBRARY_TYPES = [
 ];
 
 function enrichDeckForLibrary(deck: DeckPreview, index: number): LibraryDeck {
-  const industry = LIBRARY_INDUSTRIES[index % LIBRARY_INDUSTRIES.length];
-  const category = LIBRARY_TYPES[index % LIBRARY_TYPES.length];
+  const rawIndustry = typeof deck.industry === "string" ? deck.industry.trim() : "";
+  const rawType = typeof deck.deckType === "string" ? deck.deckType.trim() : "";
+  const industry = rawIndustry.length > 0 ? rawIndustry : LIBRARY_INDUSTRIES[index % LIBRARY_INDUSTRIES.length];
+  const deckType = rawType.length > 0 ? rawType : LIBRARY_TYPES[index % LIBRARY_TYPES.length];
   const summary = deck.description?.trim() || "No summary available yet.";
 
   return {
     ...deck,
     industry,
-    category,
+    deckType,
     summary,
   };
 }
@@ -547,6 +551,8 @@ function normalizeDeckRecord(raw: any): DeckPreview | null {
     redactedPptxPath: typeof redactedPptxCandidate === "string" ? redactedPptxCandidate : undefined,
     redactedPdfPath: typeof redactedPdfCandidate === "string" ? redactedPdfCandidate : undefined,
     redactedJsonPath: typeof redactedJsonCandidate === "string" ? redactedJsonCandidate : undefined,
+    industry: typeof raw.industry === "string" ? raw.industry : undefined,
+    deckType: typeof raw.deck_type === "string" ? raw.deck_type : typeof raw.deckType === "string" ? raw.deckType : undefined,
     slideCount,
     finalized,
   };
@@ -1316,7 +1322,7 @@ function LibraryView() {
     const term = searchTerm.trim().toLowerCase();
     return decks.filter((deck) => {
       const industryMatch = selectedIndustries.length === 0 || selectedIndustries.includes(deck.industry);
-      const typeMatch = selectedTypes.length === 0 || selectedTypes.includes(deck.category);
+      const typeMatch = selectedTypes.length === 0 || selectedTypes.includes(deck.deckType);
       const termMatch =
         term.length === 0 ||
         deck.title.toLowerCase().includes(term) ||
@@ -1678,7 +1684,7 @@ function LibraryDeckCard({ deck }: { deck: LibraryDeck }) {
               letterSpacing: 0.5,
             }}
           >
-            {deck.category}
+            {deck.deckType}
           </span>
           {typeof deck.slideCount === "number" && Number.isFinite(deck.slideCount) && (
             <span
@@ -1766,6 +1772,8 @@ function UploadPrepView({
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [instructions, setInstructions] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [deckType, setDeckType] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1775,12 +1783,20 @@ function UploadPrepView({
       setError("Select a .pptx file first.");
       return;
     }
+    if (!industry) {
+      setError("Select an industry.");
+      return;
+    }
+    if (!deckType) {
+      setError("Select a deck type.");
+      return;
+    }
 
     setBusy(true);
     setError(null);
 
     try {
-      const { deck, render, deckId } = await uploadDeck(file, instructions);
+      const { deck, render, deckId } = await uploadDeck(file, instructions, industry, deckType);
       onComplete({
         deck,
         render,
@@ -1846,16 +1862,82 @@ function UploadPrepView({
           <input
             type="file"
             accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setError(null);
+            }}
             disabled={busy}
           />
         </label>
+
+        <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 14, color: "#1f2937" }}>
+            <span style={{ fontWeight: 600 }}>Industry</span>
+            <select
+              value={industry}
+              onChange={(event) => {
+                setIndustry(event.target.value);
+                setError(null);
+              }}
+              disabled={busy}
+              style={{
+                borderRadius: 12,
+                border: "1px solid #d1d5db",
+                padding: "10px 12px",
+                fontSize: 14,
+                color: industry ? "#0f172a" : "#9ca3af",
+                background: "#fff",
+              }}
+            >
+              <option value="" disabled>
+                Select industry
+              </option>
+              {LIBRARY_INDUSTRIES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: "grid", gap: 6, fontSize: 14, color: "#1f2937" }}>
+            <span style={{ fontWeight: 600 }}>Deck type</span>
+            <select
+              value={deckType}
+              onChange={(event) => {
+                setDeckType(event.target.value);
+                setError(null);
+              }}
+              disabled={busy}
+              style={{
+                borderRadius: 12,
+                border: "1px solid #d1d5db",
+                padding: "10px 12px",
+                fontSize: 14,
+                color: deckType ? "#0f172a" : "#9ca3af",
+                background: "#fff",
+              }}
+            >
+              <option value="" disabled>
+                Select deck type
+              </option>
+              {LIBRARY_TYPES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         <label style={{ display: "grid", gap: 8, fontSize: 14, color: "#1f2937" }}>
           <span style={{ fontWeight: 600 }}>Redaction instructions</span>
           <textarea
             value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
+            onChange={(e) => {
+              setInstructions(e.target.value);
+              setError(null);
+            }}
             placeholder="e.g. Redact client names and revenue figures"
             rows={4}
             style={{
@@ -2718,11 +2800,19 @@ function EmptyState({ message, small }: { message: string; small?: boolean }) {
 async function uploadDeck(
   file: File,
   instructions?: string,
+  industry?: string,
+  deckType?: string,
 ): Promise<{ deck: ExtractResponse; render: RenderResult; deckId?: string }> {
   const form = new FormData();
   form.append("file", file);
   if (instructions && instructions.trim()) {
     form.append("instructions", instructions.trim());
+  }
+  if (industry && industry.trim()) {
+    form.append("industry", industry.trim());
+  }
+  if (deckType && deckType.trim()) {
+    form.append("deckType", deckType.trim());
   }
 
   const response = await fetch("/api/upload", {
