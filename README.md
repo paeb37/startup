@@ -128,7 +128,7 @@ tools/
 1. Start the warm LibreOffice converter (runs on port 5019 by default):
    ```bash
    cd tools
-   docker compose up lo-converter
+   docker-compose up lo-converter
    ```
 
 2. In another terminal, launch the .NET API (it will call the converter via `LIBRE_CONVERTER_URL`, defaulting to `http://127.0.0.1:5019`):

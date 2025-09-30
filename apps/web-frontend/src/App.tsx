@@ -2079,8 +2079,6 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
   const activeDoc = workingRender?.doc ?? null;
   const viewerKey = previewEnabled && previewRender ? "preview" : "original";
   const thumbnailDoc = render?.doc ?? null;
-  const slideWidthEmu = deckPayload?.slideWidthEmu ?? 9144000;
-  const slideHeightEmu = deckPayload?.slideHeightEmu ?? 6858000;
 
   useEffect(() => {
     if (!activeDoc) return;
@@ -2283,8 +2281,6 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
                 highlights={slideActions}
                 previewEnabled={previewEnabled}
                 loadingHighlights={actionsLoading || previewLoading}
-                slideWidthEmu={slideWidthEmu}
-                slideHeightEmu={slideHeightEmu}
               />
             ) : (
               <EmptyState message="Upload a .pptx to see a large preview here." />
@@ -3155,16 +3151,12 @@ function MainSlideViewer({
   highlights = [],
   previewEnabled = false,
   loadingHighlights = false,
-  slideWidthEmu,
-  slideHeightEmu,
 }: {
   doc: PDFDocumentProxy;
   pageNum: number;
   highlights?: RuleActionRecord[];
   previewEnabled?: boolean;
   loadingHighlights?: boolean;
-  slideWidthEmu?: number;
-  slideHeightEmu?: number;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -3184,100 +3176,133 @@ function MainSlideViewer({
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    
+    const updateBox = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setBox({ w: rect.width, h: rect.height });
+      }
+    };
+    
     const ro = new ResizeObserver((entries) => {
       const r = entries[0].contentRect;
-      setBox({ w: r.width, h: r.height });
+      if (r.width > 0 && r.height > 0) {
+        setBox({ w: r.width, h: r.height });
+      }
     });
+    
     ro.observe(el);
-    setBox({ w: el.clientWidth, h: el.clientHeight });
-    return () => ro.disconnect();
+    
+    // Multiple attempts to get dimensions, with increasing delays
+    const timeouts = [
+      setTimeout(updateBox, 0),
+      setTimeout(updateBox, 10),
+      setTimeout(updateBox, 50),
+      setTimeout(updateBox, 100),
+    ];
+    
+    return () => {
+      ro.disconnect();
+      timeouts.forEach(clearTimeout);
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!doc || !pageNum || box.w <= 0 || box.h <= 0) return;
-
-      const page: PDFPageProxy = await doc.getPage(pageNum);
-      const baseRotation = (page.rotate || 0) % 360;
-      const effectiveRotation = baseRotation === 180 ? 0 : baseRotation;
-
-      const viewArray = page.view || [0, 0, 0, 0];
-      const viewXMin = viewArray[0];
-      const viewYMin = viewArray[1];
-      const viewXMax = viewArray[2];
-      const viewYMax = viewArray[3];
-      const viewWidth = viewXMax - viewXMin;
-      const viewHeight = viewYMax - viewYMin;
-
-      const vp = page.getViewport({ scale: 1, rotation: effectiveRotation });
-
-      let contentWidth = Math.abs(effectiveRotation % 180 === 0 ? viewWidth : viewHeight);
-      let contentHeight = Math.abs(effectiveRotation % 180 === 0 ? viewHeight : viewWidth);
-
-      if (slideWidthEmu && slideHeightEmu) {
-        const widthPt = slideWidthEmu / EMU_PER_POINT;
-        const heightPt = slideHeightEmu / EMU_PER_POINT;
-        contentWidth = widthPt;
-        contentHeight = heightPt;
+      // Wait for proper dimensions or use fallback
+      if (!doc || !pageNum) return;
+      if (box.w <= 0 || box.h <= 0) {
+        // If dimensions aren't ready, force immediate measurement
+        const el = wrapRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            setBox({ w: rect.width, h: rect.height });
+            // Don't return - continue with rendering using the new dimensions
+          } else {
+            // If still no dimensions, wait and retry
+            setTimeout(() => {
+              if (!cancelled) {
+                const el = wrapRef.current;
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width > 0 && rect.height > 0) {
+                    setBox({ w: rect.width, h: rect.height });
+                  }
+                }
+              }
+            }, 100);
+            return;
+          }
+        } else {
+          return;
+        }
       }
 
-      // Fit-to-box scaling (contain), clamp to sane max CSS width
-      const MAX_CSS_W = 1200;
-      const availW = Math.min(box.w - 32, MAX_CSS_W);
-      const availH = box.h - 32;
-      const cssScale = Math.max(0.1, Math.min(availW / contentWidth, availH / contentHeight));
-
-      // HiDPI rendering
+      const page: PDFPageProxy = await doc.getPage(pageNum);
+      
+      // Use the same simple approach as thumbnails - no rotation handling since backend normalizes it
+      const baseViewport = page.getViewport({ scale: 1 });
+      
+      // Use exact same logic as thumbnails - create new canvas like thumbnails do
       const dpr = window.devicePixelRatio || 1;
-      const renderScale = cssScale * dpr;
-      const renderVp = page.getViewport({
-        scale: renderScale,
-        rotation: effectiveRotation,
-        offsetX: -viewXMin,
-        offsetY: -viewYMin,
-      });
+      
+      // Calculate target width to fit the available space
+      const MAX_CSS_W = 1200;
+      const MIN_AVAIL_W = 400;
+      const targetWidth = Math.max(MIN_AVAIL_W, Math.min(box.w - 32, MAX_CSS_W));
+      
+      // Use same scaling logic as thumbnails
+      const scale = targetWidth / baseViewport.width;
+      const renderViewport = page.getViewport({ scale: scale * dpr });
 
+      // Create a new canvas like thumbnails do
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = Math.max(1, Math.floor(renderViewport.width));
+      tempCanvas.height = Math.max(1, Math.floor(renderViewport.height));
+
+      const tempCtx = tempCanvas.getContext("2d")!;
+      tempCtx.imageSmoothingQuality = "high";
+
+      // Render to temp canvas like thumbnails
+      const renderTask = page.render({ canvasContext: tempCtx, viewport: renderViewport, canvas: tempCanvas });
+      await renderTask.promise;
+      
+      if (cancelled) return;
+
+      // Copy to the actual canvas
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const cssWidth = Math.floor(contentWidth * cssScale);
-      const cssHeight = Math.floor(contentHeight * cssScale);
-
-      canvas.width = Math.floor(contentWidth * renderScale);
-      canvas.height = Math.floor(contentHeight * renderScale);
-      canvas.style.width = `${cssWidth}px`;
-      canvas.style.height = `${cssHeight}px`;
+      canvas.width = Math.max(1, Math.floor(renderViewport.width));
+      canvas.height = Math.max(1, Math.floor(renderViewport.height));
+      canvas.style.width = `${targetWidth}px`;
+      canvas.style.height = `${Math.floor(baseViewport.height * scale)}px`;
 
       ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(tempCanvas, 0, 0);
 
       const info = {
-        cssScale,
-        width: cssWidth,
-        height: cssHeight,
-        viewXMin,
-        viewYMin,
-        viewWidth,
-        viewHeight,
-        rotation: effectiveRotation,
+        cssScale: scale,
+        width: targetWidth,
+        height: Math.floor(baseViewport.height * scale),
+        viewXMin: 0,
+        viewYMin: 0,
+        viewWidth: baseViewport.width,
+        viewHeight: baseViewport.height,
+        rotation: 0,
       };
       setRenderInfo(info);
-
-      const translateX = -viewXMin * renderScale;
-      const translateY = -viewYMin * renderScale;
-      ctx.setTransform(1, 0, 0, 1, translateX, translateY);
-
-      const task = page.render({ canvasContext: ctx, viewport: renderVp, canvas });
-      await task.promise;
-      if (cancelled) return;
     })();
 
     return () => {
       cancelled = true;
     };
   }, [doc, pageNum, box.w, box.h]);
+
 
   const overlayRects = useMemo(() => {
     if (
