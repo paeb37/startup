@@ -26,6 +26,8 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 
 public static partial class Program
 {
@@ -50,9 +52,13 @@ public static partial class Program
 
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
             p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+        builder.Services.AddMemoryCache();
 
         var app = builder.Build();
         app.UseCors();
+
+        var deckCache = app.Services.GetRequiredService<IMemoryCache>();
+        var cacheExpiration = TimeSpan.FromMinutes(5);
 
         app.MapPost("/api/upload", async (HttpRequest req) =>
         {
@@ -79,13 +85,18 @@ public static partial class Program
                 : null;
             deckType = string.IsNullOrWhiteSpace(deckType) ? null : deckType!.Trim();
 
+            Guid deckId = Guid.Empty;
+            var requestStopwatch = Stopwatch.StartNew();
+
             try
             {
                 await using var ms = new MemoryStream();
                 await file.CopyToAsync(ms);
                 ms.Position = 0;
 
+                var extractSw = Stopwatch.StartNew();
                 var deck = ExtractDeck(ms, file.FileName);
+                LogTiming("extract deck", extractSw.Elapsed, $"slides {deck.slideCount}");
 
                 var jsonOptions = CreateDeckJsonOptions();
 
@@ -98,8 +109,9 @@ public static partial class Program
                     );
                 }
 
-                var deckId = Guid.NewGuid();
+                deckId = Guid.NewGuid();
 
+                var artifactsSw = Stopwatch.StartNew();
                 var artifacts = await GenerateInitialArtifactsAsync(
                     ms,
                     deck,
@@ -107,15 +119,23 @@ public static partial class Program
                     deckId,
                     supabaseSettings,
                     req.HttpContext.RequestAborted);
+                LogTiming("initial artifacts", artifactsSw.Elapsed, deckId.ToString("n"));
+
+                var originalBytes = ms.ToArray();
+                deckCache.Set(GetDeckCacheKey(deckId), originalBytes, new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = cacheExpiration
+                });
 
                 var pdfInfo = new
                 {
                     fileName = artifacts.PdfFileName,
-                    base64 = Convert.ToBase64String(artifacts.PdfBytes)
+                    base64 = ConvertToBase64WithTiming(artifacts.PdfBytes)
                 };
 
                 try
                 {
+                    var insertSw = Stopwatch.StartNew();
                     await InsertDeckRecordAsync(
                         deck,
                         deckId,
@@ -124,6 +144,7 @@ public static partial class Program
                         deckType,
                         supabaseSettings,
                         req.HttpContext.RequestAborted);
+                    LogTiming("insert deck record", insertSw.Elapsed, deckId.ToString("n"));
                 }
                 catch (Exception supabaseEx)
                 {
@@ -154,8 +175,10 @@ public static partial class Program
 
                     try
                     {
+                        var semanticSw = Stopwatch.StartNew();
                         var response = await client.PostAsync(redactUrl, content);
                         var responseBody = await response.Content.ReadAsStringAsync();
+                        LogTiming("semantic redact call", semanticSw.Elapsed, deckId.ToString("n"));
 
                         if (response.IsSuccessStatusCode)
                         {
@@ -201,10 +224,12 @@ public static partial class Program
                     instructions
                 };
 
+                LogTiming("upload handler", requestStopwatch.Elapsed, deckId.ToString("n"));
                 return Results.Text(JsonSerializer.Serialize(resultPayload, jsonOptions), "application/json");
             }
             catch (Exception ex)
             {
+                LogTiming("upload handler failed", requestStopwatch.Elapsed, deckId == Guid.Empty ? "no-deck" : deckId.ToString("n"));
                 return Results.BadRequest(new { error = ex.Message });
             }
         });
@@ -252,153 +277,201 @@ public static partial class Program
 
         app.MapPost("/api/decks/{deckId:guid}/redact", async (Guid deckId, CancellationToken cancellationToken) =>
         {
-            var settings = ReadSupabaseSettings(app.Configuration);
-            if (settings is null)
-            {
-                return Results.Problem(
-                    detail: "Supabase storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
-                    statusCode: 500);
-            }
+            var handlerSw = Stopwatch.StartNew();
+            var handlerStatus = "redact handler failed";
+            var handlerDetail = deckId.ToString("n");
 
-            DeckRecord? deckRecord;
             try
             {
-                deckRecord = await FetchDeckRecordAsync(deckId, settings, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem($"Failed to load deck metadata: {ex.Message}", statusCode: 500);
-            }
+                var settings = ReadSupabaseSettings(app.Configuration);
+                if (settings is null)
+                {
+                    handlerDetail = "settings-missing";
+                    return Results.Problem(
+                        detail: "Supabase storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
+                        statusCode: 500);
+                }
 
-            if (deckRecord is null || string.IsNullOrWhiteSpace(deckRecord.PptxPath))
-            {
-                return Results.NotFound(new { error = "Deck PPTX not found" });
-            }
-
-            var originalPptx = await DownloadSupabaseObjectAsync(settings, deckRecord.PptxPath!, cancellationToken);
-            if (originalPptx is null || originalPptx.Length == 0)
-            {
-                return Results.NotFound(new { error = "Unable to download original deck" });
-            }
-
-            List<RuleActionRecord> ruleActions;
-            try
-            {
-                ruleActions = await FetchRuleActionsAsync(deckId, settings, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem($"Failed to load rule actions: {ex.Message}", statusCode: 500);
-            }
-
-            int appliedCount = 0;
-            byte[] redactedBytes;
-
-            if (ruleActions.Count > 0)
-            {
+                DeckRecord? deckRecord;
                 try
                 {
-                    redactedBytes = ApplyRuleActionsToPptx(originalPptx, ruleActions, out appliedCount);
+                    deckRecord = await FetchDeckRecordAsync(deckId, settings, cancellationToken);
                 }
                 catch (Exception ex)
                 {
-                    var detail = ex is AggregateException agg ? string.Join("; ", agg.InnerExceptions.Select(e => e.Message)) : ex.Message;
-                    return Results.Json(new
+                    handlerDetail = "fetch-deck";
+                    return Results.Problem($"Failed to load deck metadata: {ex.Message}", statusCode: 500);
+                }
+
+                if (deckRecord is null || string.IsNullOrWhiteSpace(deckRecord.PptxPath))
+                {
+                    handlerDetail = "deck-pptx-missing";
+                    return Results.NotFound(new { error = "Deck PPTX not found" });
+                }
+
+                var cacheKey = GetDeckCacheKey(deckId);
+                if (!deckCache.TryGetValue(cacheKey, out byte[]? originalPptx))
+                {
+                    originalPptx = await DownloadSupabaseObjectAsync(settings, deckRecord.PptxPath!, cancellationToken);
+                    if (originalPptx != null && originalPptx.Length > 0)
                     {
-                        error = "failed_to_apply_redactions",
-                        message = detail,
-                        stack = ex.StackTrace,
-                    }, statusCode: 500);
+                        deckCache.Set(cacheKey, originalPptx, new MemoryCacheEntryOptions
+                        {
+                            SlidingExpiration = cacheExpiration
+                        });
+                    }
                 }
-            }
-            else
-            {
-                redactedBytes = originalPptx;
-            }
+                else
+                {
+                    LogTiming("deck cache hit", TimeSpan.Zero, deckId.ToString("n"));
+                }
 
-            var jsonOptions = CreateDeckJsonOptions();
+                if (originalPptx is null || originalPptx.Length == 0)
+                {
+                    handlerDetail = "download-missing";
+                    return Results.NotFound(new { error = "Unable to download original deck" });
+                }
 
-            var originalPath = NormalizeStoragePath(deckRecord.PptxPath!);
-            var originalFileName = Path.GetFileNameWithoutExtension(originalPath);
-            var redactedBaseName = string.IsNullOrWhiteSpace(originalFileName)
-                ? $"{deckId.ToString("n")}-redacted"
-                : $"{originalFileName}-redacted";
-
-            var tempRoot = Path.Combine(Path.GetTempPath(), "dexter-redacted", Guid.NewGuid().ToString("n"));
-            Directory.CreateDirectory(tempRoot);
-
-            try
-            {
-                var redactedLocalPptx = Path.Combine(tempRoot, $"{redactedBaseName}.pptx");
-                await File.WriteAllBytesAsync(redactedLocalPptx, redactedBytes, cancellationToken);
-
-                await using var redactedStream = new MemoryStream(redactedBytes, writable: false);
-                var redactedDeck = ExtractDeck(redactedStream, Path.GetFileName(deckRecord.PptxPath) ?? $"{redactedBaseName}.pptx");
-
-                var redactedArtifacts = await PersistRedactedArtifactsAsync(
-                    redactedLocalPptx,
-                    redactedDeck,
-                    redactedBaseName,
-                    deckId,
-                    settings,
-                    jsonOptions,
-                    cancellationToken);
-
+                List<RuleActionRecord> ruleActions;
                 try
                 {
-                    await DeleteSlidesForDeckAsync(deckId, settings, cancellationToken);
+                    ruleActions = await FetchRuleActionsAsync(deckId, settings, cancellationToken);
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"Slide cleanup failed: {ex.Message}");
+                    handlerDetail = "rule-actions";
+                    return Results.Problem($"Failed to load rule actions: {ex.Message}", statusCode: 500);
                 }
 
-                await ReplaceSlideEmbeddingsAsync(
-                    redactedDeck,
-                    deckId,
-                    redactedArtifacts.ImageCaptions,
-                    settings,
-                    cancellationToken);
+                int appliedCount = 0;
+                byte[] redactedBytes;
+
+                if (ruleActions.Count > 0)
+                {
+                    try
+                    {
+                        var applySw = Stopwatch.StartNew();
+                        redactedBytes = ApplyRuleActionsToPptx(originalPptx, ruleActions, out appliedCount);
+                        LogTiming("apply rule actions", applySw.Elapsed, $"{deckId:n} actions {ruleActions.Count}");
+                    }
+                    catch (Exception ex)
+                    {
+                        var detail = ex is AggregateException agg ? string.Join("; ", agg.InnerExceptions.Select(e => e.Message)) : ex.Message;
+                        handlerDetail = "apply-failed";
+                        return Results.Json(new
+                        {
+                            error = "failed_to_apply_redactions",
+                            message = detail,
+                            stack = ex.StackTrace,
+                        }, statusCode: 500);
+                    }
+                }
+                else
+                {
+                    redactedBytes = originalPptx;
+                }
+
+                var jsonOptions = CreateDeckJsonOptions();
+
+                var originalPath = NormalizeStoragePath(deckRecord.PptxPath!);
+                var originalFileName = Path.GetFileNameWithoutExtension(originalPath);
+                var redactedBaseName = string.IsNullOrWhiteSpace(originalFileName)
+                    ? $"{deckId.ToString("n")}-redacted"
+                    : $"{originalFileName}-redacted";
+
+                var tempRoot = Path.Combine(Path.GetTempPath(), "dexter-redacted", Guid.NewGuid().ToString("n"));
+                Directory.CreateDirectory(tempRoot);
 
                 try
                 {
-                    await UpdateDeckWithRedactedArtifactsAsync(
+                    var redactedLocalPptx = Path.Combine(tempRoot, $"{redactedBaseName}.pptx");
+                    await File.WriteAllBytesAsync(redactedLocalPptx, redactedBytes, cancellationToken);
+
+                    await using var redactedStream = new MemoryStream(redactedBytes, writable: false);
+                    var extractSw = Stopwatch.StartNew();
+                    var redactedDeck = ExtractDeck(redactedStream, Path.GetFileName(deckRecord.PptxPath) ?? $"{redactedBaseName}.pptx");
+                    LogTiming("extract deck (redacted)", extractSw.Elapsed, $"{deckId:n} slides {redactedDeck.slideCount}");
+
+                    var persistSw = Stopwatch.StartNew();
+                    var redactedArtifacts = await PersistRedactedArtifactsAsync(
+                        redactedLocalPptx,
+                        redactedDeck,
+                        redactedBaseName,
                         deckId,
-                        redactedArtifacts.PptxPath,
-                        redactedArtifacts.PdfPath,
-                        redactedArtifacts.JsonPath,
-                        redactedDeck.slideCount,
+                        settings,
+                        jsonOptions,
+                        cancellationToken);
+                    LogTiming("persist redacted artifacts (handler)", persistSw.Elapsed, deckId.ToString("n"));
+
+                    try
+                    {
+                        await DeleteSlidesForDeckAsync(deckId, settings, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Slide cleanup failed: {ex.Message}");
+                    }
+
+                    await ReplaceSlideEmbeddingsAsync(
+                        redactedDeck,
+                        deckId,
+                        redactedArtifacts.ImageCaptions,
                         settings,
                         cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    return Results.Problem($"Failed to update deck record: {ex.Message}", statusCode: 500);
-                }
 
-                string? signedUrl = null;
-                try
-                {
-                    signedUrl = await CreateSupabaseSignedUrlAsync(settings, redactedArtifacts.PptxPath, 3600, cancellationToken);
-                }
-                catch
-                {
-                    signedUrl = null;
-                }
+                    try
+                    {
+                        var updateSw = Stopwatch.StartNew();
+                        await UpdateDeckWithRedactedArtifactsAsync(
+                            deckId,
+                            redactedArtifacts.PptxPath,
+                            redactedArtifacts.PdfPath,
+                            redactedArtifacts.JsonPath,
+                            redactedDeck.slideCount,
+                            settings,
+                            cancellationToken);
+                        LogTiming("update deck record", updateSw.Elapsed, deckId.ToString("n"));
+                    }
+                    catch (Exception ex)
+                    {
+                        handlerDetail = "update-deck";
+                        return Results.Problem($"Failed to update deck record: {ex.Message}", statusCode: 500);
+                    }
 
-                return Results.Json(new
+                    string? signedUrl = null;
+                    try
+                    {
+                        var signedSw = Stopwatch.StartNew();
+                        signedUrl = await CreateSupabaseSignedUrlAsync(settings, redactedArtifacts.PptxPath, 3600, cancellationToken);
+                        if (signedUrl != null)
+                        {
+                            LogTiming("create signed url", signedSw.Elapsed, deckId.ToString("n"));
+                        }
+                    }
+                    catch
+                    {
+                        signedUrl = null;
+                    }
+
+                    handlerStatus = "redact handler";
+                    return Results.Json(new
+                    {
+                        success = true,
+                        actionsApplied = appliedCount,
+                        path = redactedArtifacts.PptxPath,
+                        fileName = Path.GetFileName(redactedArtifacts.PptxPath),
+                        downloadUrl = signedUrl,
+                        generated = ruleActions.Count > 0
+                    });
+                }
+                finally
                 {
-                    success = true,
-                    actionsApplied = appliedCount,
-                    path = redactedArtifacts.PptxPath,
-                    fileName = Path.GetFileName(redactedArtifacts.PptxPath),
-                    downloadUrl = signedUrl,
-                    generated = ruleActions.Count > 0
-                });
+                    try { Directory.Delete(tempRoot, recursive: true); } catch { /* ignore */ }
+                }
             }
             finally
             {
-                try { Directory.Delete(tempRoot, recursive: true); } catch { /* ignore */ }
+                LogTiming(handlerStatus, handlerSw.Elapsed, handlerDetail);
             }
         });
 
@@ -617,6 +690,7 @@ public static partial class Program
         SupabaseSettings settings,
         CancellationToken cancellationToken)
     {
+        var totalSw = Stopwatch.StartNew();
         var baseName = SanitizeBaseName(originalFileName);
         var tempRoot = Path.Combine(Path.GetTempPath(), "dexter-artifacts", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(tempRoot);
@@ -652,7 +726,9 @@ public static partial class Program
                 throw new InvalidOperationException("PDF conversion failed (no output file).");
             }
 
+            var pdfReadSw = Stopwatch.StartNew();
             var pdfBytes = await File.ReadAllBytesAsync(pdfPath, cancellationToken);
+            LogTiming("read pdf bytes", pdfReadSw.Elapsed, $"bytes {pdfBytes.Length}");
 
             var imageCaptions = await GenerateImageCaptionsAsync(
                 deck,
@@ -680,12 +756,14 @@ public static partial class Program
 
             pptxStream.Position = 0;
 
-            return new InitialDeckArtifacts(
+            var result = new InitialDeckArtifacts(
                 BaseName: baseName,
                 PptxStoragePath: pptxObjectPath,
                 PdfFileName: Path.GetFileName(pdfPath),
                 PdfBytes: pdfBytes,
                 ImageCaptions: imageCaptions);
+            LogTiming("initial artifacts pipeline", totalSw.Elapsed, deckId.ToString("n"));
+            return result;
         }
         finally
         {
@@ -789,6 +867,7 @@ public static partial class Program
         JsonSerializerOptions jsonOptions,
         CancellationToken cancellationToken)
     {
+        var totalSw = Stopwatch.StartNew();
         var tempDir = Path.GetDirectoryName(localPptxPath)!;
         var deckFolder = deckId.ToString("n");
         var objectPrefix = string.IsNullOrWhiteSpace(settings.StoragePathPrefix)
@@ -843,8 +922,10 @@ public static partial class Program
             cancellationToken);
 
         var jsonTempPath = Path.Combine(tempDir, $"{baseName}.json");
+        var jsonSerializeSw = Stopwatch.StartNew();
         var deckJson = JsonSerializer.Serialize(deck, jsonOptions);
         await File.WriteAllTextAsync(jsonTempPath, deckJson, cancellationToken);
+        LogTiming("write deck json", jsonSerializeSw.Elapsed, deckId.ToString("n"));
 
         var jsonObjectPath = await UploadToSupabaseStorageAsync(
             jsonTempPath,
@@ -853,11 +934,13 @@ public static partial class Program
             $"{objectPrefix}/{Path.GetFileName(jsonTempPath)}",
             cancellationToken);
 
-        return new RedactedArtifacts(
+        var result = new RedactedArtifacts(
             PptxPath: pptxObjectPath,
             PdfPath: pdfObjectPath,
             JsonPath: jsonObjectPath,
             ImageCaptions: imageCaptions);
+        LogTiming("persist redacted artifacts", totalSw.Elapsed, deckId.ToString("n"));
+        return result;
     }
 
     private static async Task DeleteSlidesForDeckAsync(
@@ -871,12 +954,17 @@ public static partial class Program
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
         request.Headers.Add("Prefer", "return=minimal");
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.NotFound)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase slide delete failed", elapsed, deckId.ToString("n"));
             throw new Exception($"Supabase slide delete failed ({(int)response.StatusCode}): {body}");
         }
+
+        LogTiming("supabase slide delete", elapsed, deckId.ToString("n"));
     }
 
     private static async Task ReplaceSlideEmbeddingsAsync(
@@ -886,8 +974,11 @@ public static partial class Program
         SupabaseSettings settings,
         CancellationToken cancellationToken)
     {
+        var totalSw = Stopwatch.StartNew();
         var now = DateTime.UtcNow;
         var slidePayload = new List<object>();
+        int embeddingAttempts = 0;
+        int embeddingSuccess = 0;
 
         foreach (var slide in deck.slides)
         {
@@ -905,7 +996,12 @@ public static partial class Program
             float[]? embedding = null;
             if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(combined))
             {
+                embeddingAttempts++;
                 embedding = await TryGenerateEmbeddingAsync(combined, settings.OpenAiKey!, settings.EmbeddingModel, cancellationToken);
+                if (embedding != null)
+                {
+                    embeddingSuccess++;
+                }
             }
 
             slidePayload.Add(new
@@ -923,6 +1019,8 @@ public static partial class Program
         {
             await PostgrestInsertAsync(settings, settings.SlidesTable, slidePayload, returnRepresentation: false, cancellationToken);
         }
+
+        LogTiming("replace slide embeddings", totalSw.Elapsed, $"{deckId:n} slides {deck.slides.Count} attempts {embeddingAttempts} success {embeddingSuccess}");
     }
 
     private static async Task UpdateDeckWithRedactedArtifactsAsync(
@@ -950,12 +1048,17 @@ public static partial class Program
         request.Headers.Add("Prefer", "return=minimal");
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase deck update failed", elapsed, deckId.ToString("n"));
             throw new Exception($"Supabase deck update failed ({(int)response.StatusCode}): {body}");
         }
+
+        LogTiming("supabase deck update", elapsed, deckId.ToString("n"));
     }
 
     private static async Task PostgrestInsertAsync(SupabaseSettings settings, string table, object payload, bool returnRepresentation, CancellationToken cancellationToken)
@@ -968,12 +1071,18 @@ public static partial class Program
         var json = JsonSerializer.Serialize(payload);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
+        var payloadSize = Encoding.UTF8.GetByteCount(json);
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase insert failed", elapsed, $"{table} bytes {payloadSize}");
             throw new Exception($"Supabase insert into '{table}' failed ({(int)response.StatusCode}): {body}");
         }
+
+        LogTiming("supabase insert", elapsed, $"{table} bytes {payloadSize}");
     }
 
     private static async Task<string> UploadToSupabaseStorageAsync(
@@ -995,13 +1104,17 @@ public static partial class Program
         request.Content = new ByteArrayContent(fileBytes);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase upload failed", elapsed, $"{normalizedPath} bytes {fileBytes.Length}");
             throw new Exception($"Supabase storage upload failed ({(int)response.StatusCode}): {body}");
         }
 
+        LogTiming("supabase upload", elapsed, $"{normalizedPath} bytes {fileBytes.Length}");
         return normalizedPath;
     }
 
@@ -1023,13 +1136,17 @@ public static partial class Program
         request.Content = new ByteArrayContent(content);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase upload failed", elapsed, $"{normalizedPath} bytes {content.Length}");
             throw new Exception($"Supabase storage upload failed ({(int)response.StatusCode}): {body}");
         }
 
+        LogTiming("supabase upload", elapsed, $"{normalizedPath} bytes {content.Length}");
         return normalizedPath;
     }
 
@@ -1068,14 +1185,18 @@ public static partial class Program
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
+            LogTiming("supabase pdf info failed", elapsed, deckId.ToString("n"));
             return null;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        LogTiming("supabase pdf info", elapsed, deckId.ToString("n"));
         if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
         {
             return null;
@@ -1107,15 +1228,19 @@ public static partial class Program
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase deck fetch failed", elapsed, deckId.ToString("n"));
             throw new Exception($"Supabase deck fetch failed ({(int)response.StatusCode}): {body}");
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        LogTiming("supabase deck fetch", elapsed, deckId.ToString("n"));
         if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
         {
             return null;
@@ -1161,15 +1286,19 @@ public static partial class Program
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("supabase rule actions failed", elapsed, deckId.ToString("n"));
             throw new Exception($"Supabase rule_actions fetch failed ({(int)response.StatusCode}): {body}");
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        LogTiming("supabase rule actions", elapsed, deckId.ToString("n"));
 
         var list = new List<RuleActionRecord>();
         if (doc.RootElement.ValueKind != JsonValueKind.Array)
@@ -1558,9 +1687,12 @@ public static partial class Program
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
         request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
+            LogTiming("supabase signed url failed", elapsed, objectPath);
             return null;
         }
 
@@ -1577,6 +1709,7 @@ public static partial class Program
             return null;
         }
 
+        LogTiming("supabase signed url", elapsed, objectPath);
         if (Uri.TryCreate(signedUrl, UriKind.Absolute, out var absolute))
         {
             var path = absolute.AbsolutePath;
@@ -1657,13 +1790,18 @@ public static partial class Program
         request.Headers.Add("apikey", settings.ServiceKey);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ServiceKey);
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
+            LogTiming("supabase download failed", elapsed, normalized);
             return null;
         }
 
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        LogTiming("supabase download", elapsed, $"{normalized} bytes {bytes.Length}");
+        return bytes;
     }
 
     private static byte[] RenderSlideToPng(
@@ -1721,9 +1859,15 @@ public static partial class Program
         CancellationToken cancellationToken)
     {
         var captionsBySlide = new Dictionary<int, List<string>>();
+        var sw = Stopwatch.StartNew();
+        int pictureCount = 0;
+        int captionRequests = 0;
 
         if (string.IsNullOrWhiteSpace(settings.OpenAiKey))
+        {
+            LogTiming("image captions skipped", TimeSpan.Zero, $"{deckId:n} (no OpenAI key)");
             return captionsBySlide;
+        }
 
         using var archive = ZipFile.OpenRead(pptxPath);
         var captionCache = new Dictionary<string, string>();
@@ -1732,6 +1876,7 @@ public static partial class Program
         {
             foreach (var picture in slide.elements.OfType<PictureDto>())
             {
+                pictureCount++;
                 if (string.IsNullOrWhiteSpace(picture.imgPath))
                     continue;
 
@@ -1754,6 +1899,7 @@ public static partial class Program
 
                 var contentType = GetMimeTypeForExtension(Path.GetExtension(entryPath));
 
+                captionRequests++;
                 var caption = await RequestImageCaptionAsync(imageBytes, contentType, settings, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(caption))
                 {
@@ -1765,6 +1911,8 @@ public static partial class Program
             }
         }
 
+        var totalCaptions = captionsBySlide.Sum(kvp => kvp.Value.Count);
+        LogTiming("image captions", sw.Elapsed, $"{deckId:n} pictures {pictureCount} requests {captionRequests} captions {totalCaptions}");
         return captionsBySlide;
     }
 
@@ -1784,20 +1932,33 @@ public static partial class Program
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.OpenAiKey))
+        {
+            LogTiming("table summaries skipped", TimeSpan.Zero, "no OpenAI key");
             return;
+        }
+
+        var sw = Stopwatch.StartNew();
+        int tableCount = 0;
+        int summaryRequests = 0;
+        int summariesCreated = 0;
 
         foreach (var table in deck.slides.SelectMany(s => s.elements).OfType<TableDto>())
         {
+            tableCount++;
             var tableText = FormatTableForSummary(table);
             if (string.IsNullOrWhiteSpace(tableText))
                 continue;
 
+            summaryRequests++;
             var summary = await RequestTableSummaryAsync(tableText, settings, cancellationToken);
             if (!string.IsNullOrWhiteSpace(summary))
             {
                 table.summary = summary.Trim();
+                summariesCreated++;
             }
         }
+
+        LogTiming("table summaries", sw.Elapsed, $"tables {tableCount} requests {summaryRequests} summaries {summariesCreated}");
     }
 
     private static string FormatTableForSummary(TableDto table)
@@ -1931,16 +2092,21 @@ public static partial class Program
         request.Headers.Add("OpenAI-Beta", "assistants=v2");
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
             Console.Error.WriteLine($"Vision caption request failed ({(int)response.StatusCode}): {error}");
-        return null;
-    }
+            LogTiming("vision caption failed", elapsed, $"bytes {imageBytes.Length}");
+            return null;
+        }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        LogTiming("vision caption", elapsed, $"bytes {imageBytes.Length}");
 
         if (doc.RootElement.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
         {
@@ -2016,16 +2182,21 @@ public static partial class Program
         request.Headers.Add("OpenAI-Beta", "assistants=v2");
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
             Console.Error.WriteLine($"Table summary request failed ({(int)response.StatusCode}): {error}");
+            LogTiming("table summary failed", elapsed, $"chars {tableText.Length}");
             return null;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        LogTiming("table summary", elapsed, $"chars {tableText.Length}");
 
         if (doc.RootElement.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
         {
@@ -2144,10 +2315,12 @@ public static partial class Program
         psi.ArgumentList.Add(outDir);
         psi.ArgumentList.Add(inputPath);
 
+        var sw = Stopwatch.StartNew();
         using var proc = Process.Start(psi)!;
         var stdOut = await proc.StandardOutput.ReadToEndAsync();
         var stdErr = await proc.StandardError.ReadToEndAsync();
         await proc.WaitForExitAsync();
+        var elapsed = sw.Elapsed;
 
         try
         {
@@ -2160,8 +2333,11 @@ public static partial class Program
 
         if (proc.ExitCode != 0)
         {
+            LogTiming("libreoffice convert failed", elapsed, Path.GetFileName(inputPath));
             throw new Exception($"LibreOffice conversion failed (code {proc.ExitCode}). stderr: {stdErr}. stdout: {stdOut}");
         }
+
+        LogTiming("libreoffice convert", elapsed, Path.GetFileName(inputPath));
     }
 
     private static string ExtractSlidePlainText(SlideDto slide)
@@ -2221,18 +2397,38 @@ public static partial class Program
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
+        var sw = Stopwatch.StartNew();
         using var response = await SharedHttpClient.SendAsync(request, cancellationToken);
+        var elapsed = sw.Elapsed;
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             Console.Error.WriteLine($"Embedding request failed ({(int)response.StatusCode}): {body}");
+            LogTiming("embedding failed", elapsed, $"chars {input.Length}");
             return null;
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var embeddingResponse = await JsonSerializer.DeserializeAsync<OpenAiEmbeddingResponse>(stream, cancellationToken: cancellationToken);
         var vector = embeddingResponse?.Data?.FirstOrDefault()?.Embedding;
+        LogTiming("embedding", elapsed, $"chars {input.Length}");
         return vector?.ToArray();
+    }
+
+    private static string GetDeckCacheKey(Guid deckId) => $"deck:pptx:{deckId:n}";
+
+    private static string ConvertToBase64WithTiming(byte[] data)
+    {
+        var sw = Stopwatch.StartNew();
+        var base64 = Convert.ToBase64String(data);
+        LogTiming("pdf base64 encode", sw.Elapsed, $"bytes {data.Length}");
+        return base64;
+    }
+
+    private static void LogTiming(string operation, TimeSpan elapsed, string? detail = null)
+    {
+        var suffix = string.IsNullOrWhiteSpace(detail) ? string.Empty : $" :: {detail}";
+        Console.WriteLine($"[timing] {operation}{suffix} took {elapsed.TotalMilliseconds:F0} ms");
     }
 
     private sealed record InitialDeckArtifacts(
