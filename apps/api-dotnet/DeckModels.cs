@@ -6,6 +6,8 @@ public class DeckDto
 {
     public string file { get; set; } = "";
     public int slideCount { get; set; }
+    public long slideWidthEmu { get; set; }
+    public long slideHeightEmu { get; set; }
     public List<SlideDto> slides { get; set; } = new();
 }
 

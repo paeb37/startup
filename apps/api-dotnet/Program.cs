@@ -32,6 +32,8 @@ using Microsoft.Extensions.DependencyInjection;
 public static partial class Program
 {
     private static readonly HttpClient SharedHttpClient = new();
+    private static readonly HttpClient ConverterHttpClient = new();
+    private static string ConverterServiceBaseUrl = Environment.GetEnvironmentVariable("LIBRE_CONVERTER_URL") ?? "http://127.0.0.1:5019";
 
     public static async Task Main(string[] args)
     {
@@ -59,6 +61,8 @@ public static partial class Program
 
         var deckCache = app.Services.GetRequiredService<IMemoryCache>();
         var cacheExpiration = TimeSpan.FromMinutes(5);
+        ConverterServiceBaseUrl = (app.Configuration["LIBRE_CONVERTER_URL"] ?? ConverterServiceBaseUrl)?.TrimEnd('/') ?? string.Empty;
+        ConverterHttpClient.Timeout = TimeSpan.FromSeconds(60);
 
         app.MapPost("/api/upload", async (HttpRequest req) =>
         {
@@ -273,6 +277,115 @@ public static partial class Program
             }
 
             return Results.Content(payload, "application/json");
+        });
+
+        app.MapPost("/api/decks/{deckId:guid}/preview", async (Guid deckId, PreviewRequest? payload, CancellationToken cancellationToken) =>
+        {
+            if (payload is null || payload.Slide < 1)
+            {
+                return Results.BadRequest(new { error = "slide must be >= 1" });
+            }
+
+            var settings = ReadSupabaseSettings(app.Configuration);
+            if (settings is null)
+            {
+                return Results.Problem(
+                    detail: "Supabase storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
+                    statusCode: 500);
+            }
+
+            var cacheKey = GetDeckCacheKey(deckId);
+            byte[]? originalPptx;
+            if (!deckCache.TryGetValue(cacheKey, out originalPptx))
+            {
+                DeckRecord? deckRecord;
+                try
+                {
+                    deckRecord = await FetchDeckRecordAsync(deckId, settings, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    return Results.Problem($"Failed to load deck metadata: {ex.Message}", statusCode: 500);
+                }
+
+                if (deckRecord is null || string.IsNullOrWhiteSpace(deckRecord.PptxPath))
+                {
+                    return Results.NotFound(new { error = "Deck PPTX not found" });
+                }
+
+                originalPptx = await DownloadSupabaseObjectAsync(settings, deckRecord.PptxPath!, cancellationToken);
+                if (originalPptx != null && originalPptx.Length > 0)
+                {
+                    deckCache.Set(cacheKey, originalPptx, new MemoryCacheEntryOptions { SlidingExpiration = cacheExpiration });
+                }
+            }
+            else
+            {
+                LogTiming("deck cache hit", TimeSpan.Zero, deckId.ToString("n"));
+            }
+
+            if (originalPptx is null || originalPptx.Length == 0)
+            {
+                return Results.NotFound(new { error = "Unable to load deck PPTX" });
+            }
+
+            List<RuleActionRecord> ruleActions;
+            try
+            {
+                ruleActions = await FetchRuleActionsAsync(deckId, settings, cancellationToken, payload.Slide);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to load rule actions: {ex.Message}", statusCode: 500);
+            }
+
+            byte[] workingBytes = originalPptx;
+            if (ruleActions.Count > 0)
+            {
+                try
+                {
+                    workingBytes = ApplyRuleActionsToPptx(originalPptx, ruleActions, out _);
+                }
+                catch (Exception ex)
+                {
+                    var detail = ex is AggregateException agg ? string.Join("; ", agg.InnerExceptions.Select(e => e.Message)) : ex.Message;
+                    return Results.Json(new { error = "preview_apply_failed", message = detail }, statusCode: 500);
+                }
+            }
+
+            var tempRoot = Path.Combine(Path.GetTempPath(), "dexter-preview", Guid.NewGuid().ToString("n"));
+            Directory.CreateDirectory(tempRoot);
+
+            try
+            {
+                var baseName = $"{deckId:n}-preview";
+                var pptxPath = Path.Combine(tempRoot, baseName + ".pptx");
+                await File.WriteAllBytesAsync(pptxPath, workingBytes, cancellationToken);
+
+                await ConvertPptxToPdfAsync(pptxPath, tempRoot, cancellationToken, payload.Slide);
+
+                var pdfPath = Path.Combine(tempRoot, baseName + ".pdf");
+                if (!File.Exists(pdfPath))
+                {
+                    var generated = Directory.GetFiles(tempRoot, "*.pdf").FirstOrDefault();
+                    if (generated != null)
+                    {
+                        pdfPath = generated;
+                    }
+                }
+
+                if (!File.Exists(pdfPath))
+                {
+                    return Results.StatusCode(500);
+                }
+
+                var pdfBytes = await File.ReadAllBytesAsync(pdfPath, cancellationToken);
+                return Results.File(pdfBytes, "application/pdf");
+            }
+            finally
+            {
+                try { Directory.Delete(tempRoot, recursive: true); } catch { /* ignore */ }
+            }
         });
 
         app.MapPost("/api/decks/{deckId:guid}/redact", async (Guid deckId, CancellationToken cancellationToken) =>
@@ -645,7 +758,7 @@ public static partial class Program
                     await file.CopyToAsync(fs);
                 }
 
-                await ConvertPptxToPdfAsync(inPath, tmpDir);
+                await ConvertPptxToPdfAsync(inPath, tmpDir, req.HttpContext.RequestAborted);
 
                 if (!File.Exists(outPdf))
                     return Results.StatusCode(500);
@@ -706,7 +819,7 @@ public static partial class Program
                 await pptxStream.CopyToAsync(fileStream, cancellationToken);
             }
 
-            await ConvertPptxToPdfAsync(pptxPath, tempRoot);
+            await ConvertPptxToPdfAsync(pptxPath, tempRoot, cancellationToken);
 
             if (!File.Exists(pdfPath))
             {
@@ -881,7 +994,7 @@ public static partial class Program
             $"{objectPrefix}/{Path.GetFileName(localPptxPath)}",
             cancellationToken);
 
-        await ConvertPptxToPdfAsync(localPptxPath, tempDir);
+        await ConvertPptxToPdfAsync(localPptxPath, tempDir, cancellationToken);
 
         var pdfPath = Path.Combine(tempDir, $"{baseName}.pdf");
         if (!File.Exists(pdfPath))
@@ -1271,7 +1384,8 @@ public static partial class Program
     private static async Task<List<RuleActionRecord>> FetchRuleActionsAsync(
         Guid deckId,
         SupabaseSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? slideFilter = null)
     {
         var query = new Dictionary<string, string?>
         {
@@ -1279,6 +1393,11 @@ public static partial class Program
             ["deck_id"] = $"eq.{deckId}",
             ["order"] = "created_at.asc"
         };
+
+        if (slideFilter.HasValue)
+        {
+            query["slide_no"] = $"eq.{slideFilter.Value}";
+        }
 
         var requestUri = QueryHelpers.AddQueryString($"{settings.Url}/rest/v1/{settings.RuleActionsTable}", query);
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
@@ -2285,7 +2404,74 @@ public static partial class Program
         return string.IsNullOrWhiteSpace(sanitized) ? "deck" : sanitized;
     }
 
-    private static async Task ConvertPptxToPdfAsync(string inputPath, string outDir)
+    private static async Task ConvertPptxToPdfAsync(string inputPath, string outDir, CancellationToken cancellationToken, int? slide = null)
+    {
+        if (!string.IsNullOrWhiteSpace(ConverterServiceBaseUrl) && Uri.TryCreate(ConverterServiceBaseUrl, UriKind.Absolute, out _))
+        {
+            try
+            {
+                await ConvertPptxToPdfRemoteAsync(inputPath, outDir, cancellationToken, slide);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Remote converter failed: {ex.Message}. Falling back to local LibreOffice conversion.");
+            }
+        }
+
+        await ConvertPptxToPdfLocalAsync(inputPath, outDir);
+    }
+
+    private static async Task ConvertPptxToPdfRemoteAsync(string inputPath, string outDir, CancellationToken cancellationToken, int? slide)
+    {
+        var requestUrl = new StringBuilder(ConverterServiceBaseUrl);
+        requestUrl.Append("/export?fmt=pdf");
+        if (slide.HasValue)
+        {
+            requestUrl.Append("&slide=").Append(slide.Value);
+        }
+
+        var pptxBytes = await File.ReadAllBytesAsync(inputPath, cancellationToken);
+        using var content = new MultipartFormDataContent();
+        var fileName = Path.GetFileName(inputPath);
+        var pptxContent = new ByteArrayContent(pptxBytes);
+        pptxContent.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        content.Add(pptxContent, "file", fileName);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl.ToString())
+        {
+            Content = content
+        };
+
+        var sw = Stopwatch.StartNew();
+        using var response = await ConverterHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var elapsed = sw.Elapsed;
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+            LogTiming("remote converter failed", elapsed, Path.GetFileName(inputPath));
+            throw new Exception($"Converter service returned {(int)response.StatusCode}: {error}");
+        }
+
+        var pdfPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(inputPath) + ".pdf");
+        await using (var target = File.Create(pdfPath))
+        {
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await responseStream.CopyToAsync(target, cancellationToken);
+        }
+
+        if (response.Headers.TryGetValues("X-Convert-Time", out var convertHeader) && convertHeader.FirstOrDefault() is { Length: > 0 } headerValue)
+        {
+            LogTiming("remote converter", elapsed, $"{Path.GetFileName(inputPath)} | {headerValue}");
+        }
+        else
+        {
+            LogTiming("remote converter", elapsed, Path.GetFileName(inputPath));
+        }
+    }
+
+    private static async Task ConvertPptxToPdfLocalAsync(string inputPath, string outDir)
     {
         var soffice = Environment.GetEnvironmentVariable("SOFFICE_PATH") ?? "soffice";
 
@@ -2443,6 +2629,8 @@ public static partial class Program
         string PdfPath,
         string JsonPath,
         Dictionary<int, List<string>> ImageCaptions);
+
+    private sealed record PreviewRequest(int Slide);
 
     private sealed record SupabaseSettings(
         string Url,

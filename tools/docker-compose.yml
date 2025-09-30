@@ -1,0 +1,10 @@
+services:
+  lo-converter:
+    build: ./converter
+    container_name: lo-converter
+    environment:
+      - TZ=America/New_York
+    ports:
+      - "127.0.0.1:5019:5019"
+    volumes:
+      - ./converter/server.py:/app/server.py:ro

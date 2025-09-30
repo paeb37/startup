@@ -19,7 +19,17 @@ public static partial class Program
         var pres = presPart.Presentation ?? throw new InvalidOperationException("Invalid PPTX (no Presentation)");
 
         var slideIds = pres.SlideIdList?.Elements<SlideId>()?.ToList() ?? new List<SlideId>();
-        var deck = new DeckDto { file = Path.GetFileName(fileName), slideCount = slideIds.Count };
+        var slideSize = pres.SlideSize;
+        long slideWidthEmu = slideSize?.Cx?.Value ?? 9144000L; // default 10"
+        long slideHeightEmu = slideSize?.Cy?.Value ?? 6858000L; // default 7.5"
+
+        var deck = new DeckDto
+        {
+            file = Path.GetFileName(fileName),
+            slideCount = slideIds.Count,
+            slideWidthEmu = slideWidthEmu,
+            slideHeightEmu = slideHeightEmu
+        };
 
         for (int i = 0; i < slideIds.Count; i++)
         {
@@ -392,4 +402,3 @@ public static partial class Program
         return list;
     }
 }
-

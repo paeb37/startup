@@ -118,9 +118,33 @@ apps/
    ├─ Program.cs
    └─ Properties/
       └─ launchSettings.json
+tools/
+└─ converter/
+   ├─ Dockerfile
+   └─ server.py
 ```
 
+## Local startup
+1. Start the warm LibreOffice converter (runs on port 5019 by default):
+   ```bash
+   cd tools
+   docker compose up lo-converter
+   ```
+
+2. In another terminal, launch the .NET API (it will call the converter via `LIBRE_CONVERTER_URL`, defaulting to `http://127.0.0.1:5019`):
+   ```bash
+   dotnet run --project apps/api-dotnet/Dexter.WebApi.csproj
+   ```
+
+3. (Optional) Start the Python semantic service:
+   ```bash
+   cd apps/python-semantic
+   pip install -r requirements.txt
+   FLASK_APP=app.py flask run --host 0.0.0.0 --port 8000 --debug
+   ```
+
 ## Troubleshooting
-- LibreOffice missing → `/api/render` returns 501; install LibreOffice or set `SOFFICE_PATH`.
+- Converter container down → conversion falls back to local LibreOffice and slows to ~8s; check `docker compose ps` in `tools/`.
+- LibreOffice missing locally → fallback path `/api/render` returns 501; install LibreOffice or set `SOFFICE_PATH`.
 - Port collision → update `applicationUrl` in `launchSettings.json`.
 - CORS is wide open for local prototyping; tighten before shipping.

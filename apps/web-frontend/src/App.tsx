@@ -52,7 +52,7 @@ type TableElement = ElementCommon & {
 type Element = TextboxElement | PictureElement | TableElement;
 
 type Slide = { index: number; elements: Element[] };
-type Deck = { file: string; slideCount: number; slides: Slide[] };
+type Deck = { file: string; slideCount: number; slideWidthEmu?: number; slideHeightEmu?: number; slides: Slide[] };
 type ExtractResponse = Deck | { error: string };
 
 type DeckPreview = {
@@ -1982,6 +1982,11 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
   const [render, setRender] = useState<RenderResult | null>(seed?.render ?? null);
   const [selectedPage, setSelectedPage] = useState<number>(1);
   const [previewEnabled, setPreviewEnabled] = useState(false);
+  const [previewRender, setPreviewRender] = useState<RenderResult | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const previewAbortRef = useRef<AbortController | null>(null);
 
   const deckId = seed?.deckId ?? null;
   const deckPayload = seed && isDeckResponse(seed.deck) ? seed.deck : null;
@@ -2058,13 +2063,24 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
     setRender(seed.render);
     setSelectedPage(1);
     setPreviewEnabled(false);
+    setPreviewRender(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+      previewAbortRef.current = null;
+    }
     setRedactResult(null);
     setRedactError(null);
     setRedactBusy(false);
   }, [seed]);
 
-  const activeDoc = render?.doc ?? null;
-  const viewerKey = "original";
+  const workingRender = previewEnabled && previewRender ? previewRender : render;
+  const activeDoc = workingRender?.doc ?? null;
+  const viewerKey = previewEnabled && previewRender ? "preview" : "original";
+  const thumbnailDoc = render?.doc ?? null;
+  const slideWidthEmu = deckPayload?.slideWidthEmu ?? 9144000;
+  const slideHeightEmu = deckPayload?.slideHeightEmu ?? 6858000;
 
   useEffect(() => {
     if (!activeDoc) return;
@@ -2072,6 +2088,96 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
       setSelectedPage(activeDoc.numPages);
     }
   }, [activeDoc, selectedPage]);
+
+  useEffect(() => {
+    if (previewEnabled) {
+      setPreviewEnabled(false);
+    }
+  }, [selectedPage]);
+
+  useEffect(() => {
+    return () => {
+      if (previewRender?.pdfUrl) {
+        URL.revokeObjectURL(previewRender.pdfUrl);
+      }
+    };
+  }, [previewRender?.pdfUrl]);
+
+  useEffect(() => {
+    if (!previewEnabled) {
+      if (previewAbortRef.current) {
+        previewAbortRef.current.abort();
+        previewAbortRef.current = null;
+      }
+      if (previewRender?.pdfUrl) {
+        URL.revokeObjectURL(previewRender.pdfUrl);
+      }
+      setPreviewRender(null);
+      setPreviewError(null);
+      setPreviewLoading(false);
+    }
+  }, [previewEnabled]);
+
+  const slideActionFingerprint = useMemo(() => {
+    if (!previewEnabled) return "";
+    return slideActions
+      .map((action) => `${action.id}:${action.new_text ?? ""}:${action.original_text ?? ""}`)
+      .join("|");
+  }, [previewEnabled, slideActions]);
+
+  useEffect(() => {
+    if (!deckId || !previewEnabled || actionsLoading) {
+      return;
+    }
+
+    const controller = new AbortController();
+    previewAbortRef.current?.abort();
+    previewAbortRef.current = controller;
+
+    async function loadPreview() {
+      setPreviewLoading(true);
+      setPreviewError(null);
+
+      try {
+        const response = await fetch(`/api/decks/${deckId}/preview`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ slide: selectedPage }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const message = await response.text().catch(() => "");
+          throw new Error(message || `Preview request failed (${response.status})`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const pdfUrl = URL.createObjectURL(blob);
+        const doc = await getDocument({ data: bytes }).promise;
+
+        setPreviewRender({ pdfUrl, doc });
+      } catch (err: any) {
+        if (controller.signal.aborted) return;
+        console.error("Preview generation failed", err);
+        setPreviewRender(null);
+        setPreviewError(err?.message ?? "Failed to generate preview");
+      } finally {
+        if (!controller.signal.aborted) {
+          setPreviewLoading(false);
+        }
+      }
+    }
+
+    loadPreview();
+
+    return () => {
+      controller.abort();
+    };
+  }, [deckId, previewEnabled, selectedPage, slideActionFingerprint, actionsLoading]);
 
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateRows: "auto 1fr", minHeight: 0 }}>
@@ -2144,19 +2250,22 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
                 <PreviewToggleButton
                   enabled={previewEnabled}
                   onToggle={() => setPreviewEnabled((prev) => !prev)}
-                  busy={previewEnabled && actionsLoading}
+                  busy={previewEnabled && (previewLoading || actionsLoading)}
                   disabled={!previewAvailable}
                   total={totalActions}
                   current={currentSlideCount}
                 />
-                {previewEnabled && actionsLoading && (
-                  <span style={{ fontSize: 12, color: "#64748b" }}>Loading overlays…</span>
+                {previewEnabled && previewLoading && (
+                  <span style={{ fontSize: 12, color: "#64748b" }}>Generating preview…</span>
                 )}
                 {noActionsForSlide && (
                   <span style={{ fontSize: 12, color: "#64748b" }}>No redactions on this slide.</span>
                 )}
                 {previewEnabled && actionsError && (
                   <span style={{ fontSize: 12, color: "#b91c1c" }}>{actionsError}</span>
+                )}
+                {previewEnabled && previewError && (
+                  <span style={{ fontSize: 12, color: "#b91c1c" }}>{previewError}</span>
                 )}
                 {previewDisabledMessage && (
                   <span style={{ fontSize: 12, color: "#b91c1c" }}>{previewDisabledMessage}</span>
@@ -2173,7 +2282,9 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
                 pageNum={selectedPage}
                 highlights={slideActions}
                 previewEnabled={previewEnabled}
-                loadingHighlights={actionsLoading}
+                loadingHighlights={actionsLoading || previewLoading}
+                slideWidthEmu={slideWidthEmu}
+                slideHeightEmu={slideHeightEmu}
               />
             ) : (
               <EmptyState message="Upload a .pptx to see a large preview here." />
@@ -2183,8 +2294,8 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
 
         <aside style={{ padding: 12, borderLeft: "1px solid #eee", overflow: "auto", background: "#fff" }}>
           <h2 style={{ fontSize: 18, margin: "8px 8px 12px" }}>Slide Deck</h2>
-          {activeDoc ? (
-            <ThumbRail key={viewerKey} doc={activeDoc} selected={selectedPage} onSelect={setSelectedPage} />
+          {thumbnailDoc ? (
+            <ThumbRail key={`thumb-${render?.pdfUrl ?? "original"}`} doc={thumbnailDoc} selected={selectedPage} onSelect={setSelectedPage} />
           ) : (
             <EmptyState small message="No slides yet." />
           )}
@@ -3044,17 +3155,30 @@ function MainSlideViewer({
   highlights = [],
   previewEnabled = false,
   loadingHighlights = false,
+  slideWidthEmu,
+  slideHeightEmu,
 }: {
   doc: PDFDocumentProxy;
   pageNum: number;
   highlights?: RuleActionRecord[];
   previewEnabled?: boolean;
   loadingHighlights?: boolean;
+  slideWidthEmu?: number;
+  slideHeightEmu?: number;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const [renderInfo, setRenderInfo] = useState({ cssScale: 1, width: 0, height: 0 });
+  const [renderInfo, setRenderInfo] = useState({
+    cssScale: 1,
+    width: 0,
+    height: 0,
+    viewXMin: 0,
+    viewYMin: 0,
+    viewWidth: 0,
+    viewHeight: 0,
+    rotation: 0,
+  });
 
   // Track available width/height for the viewer
   useEffect(() => {
@@ -3075,35 +3199,75 @@ function MainSlideViewer({
       if (!doc || !pageNum || box.w <= 0 || box.h <= 0) return;
 
       const page: PDFPageProxy = await doc.getPage(pageNum);
-      const vp = page.getViewport({ scale: 1 });
+      const baseRotation = (page.rotate || 0) % 360;
+      const effectiveRotation = baseRotation === 180 ? 0 : baseRotation;
+
+      const viewArray = page.view || [0, 0, 0, 0];
+      const viewXMin = viewArray[0];
+      const viewYMin = viewArray[1];
+      const viewXMax = viewArray[2];
+      const viewYMax = viewArray[3];
+      const viewWidth = viewXMax - viewXMin;
+      const viewHeight = viewYMax - viewYMin;
+
+      const vp = page.getViewport({ scale: 1, rotation: effectiveRotation });
+
+      let contentWidth = Math.abs(effectiveRotation % 180 === 0 ? viewWidth : viewHeight);
+      let contentHeight = Math.abs(effectiveRotation % 180 === 0 ? viewHeight : viewWidth);
+
+      if (slideWidthEmu && slideHeightEmu) {
+        const widthPt = slideWidthEmu / EMU_PER_POINT;
+        const heightPt = slideHeightEmu / EMU_PER_POINT;
+        contentWidth = widthPt;
+        contentHeight = heightPt;
+      }
 
       // Fit-to-box scaling (contain), clamp to sane max CSS width
       const MAX_CSS_W = 1200;
       const availW = Math.min(box.w - 32, MAX_CSS_W);
       const availH = box.h - 32;
-      const cssScale = Math.max(0.1, Math.min(availW / vp.width, availH / vp.height));
+      const cssScale = Math.max(0.1, Math.min(availW / contentWidth, availH / contentHeight));
 
       // HiDPI rendering
       const dpr = window.devicePixelRatio || 1;
       const renderScale = cssScale * dpr;
-      const renderVp = page.getViewport({ scale: renderScale });
+      const renderVp = page.getViewport({
+        scale: renderScale,
+        rotation: effectiveRotation,
+        offsetX: -viewXMin,
+        offsetY: -viewYMin,
+      });
 
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const cssWidth = Math.floor(renderVp.width / dpr);
-      const cssHeight = Math.floor(renderVp.height / dpr);
+      const cssWidth = Math.floor(contentWidth * cssScale);
+      const cssHeight = Math.floor(contentHeight * cssScale);
 
-      canvas.width = Math.floor(renderVp.width);
-      canvas.height = Math.floor(renderVp.height);
+      canvas.width = Math.floor(contentWidth * renderScale);
+      canvas.height = Math.floor(contentHeight * renderScale);
       canvas.style.width = `${cssWidth}px`;
       canvas.style.height = `${cssHeight}px`;
 
       ctx.imageSmoothingQuality = "high";
 
-      setRenderInfo({ cssScale, width: cssWidth, height: cssHeight });
+      const info = {
+        cssScale,
+        width: cssWidth,
+        height: cssHeight,
+        viewXMin,
+        viewYMin,
+        viewWidth,
+        viewHeight,
+        rotation: effectiveRotation,
+      };
+      setRenderInfo(info);
+
+      const translateX = -viewXMin * renderScale;
+      const translateY = -viewYMin * renderScale;
+      ctx.setTransform(1, 0, 0, 1, translateX, translateY);
 
       const task = page.render({ canvasContext: ctx, viewport: renderVp, canvas });
       await task.promise;
@@ -3116,13 +3280,22 @@ function MainSlideViewer({
   }, [doc, pageNum, box.w, box.h]);
 
   const overlayRects = useMemo(() => {
-    if (!previewEnabled || !highlights.length || renderInfo.width <= 0 || renderInfo.cssScale <= 0) {
+    if (
+      !previewEnabled ||
+      !highlights.length ||
+      renderInfo.width <= 0 ||
+      renderInfo.cssScale <= 0 ||
+      renderInfo.viewWidth === undefined ||
+      renderInfo.viewHeight === undefined
+    ) {
       return [] as Array<{ id: string; x: number; y: number; width: number; height: number; action: RuleActionRecord }>;
     }
 
     const scale = renderInfo.cssScale;
     const maxW = renderInfo.width;
     const maxH = renderInfo.height;
+    const offsetX = (renderInfo.viewXMin ?? 0) * scale;
+    const offsetY = (renderInfo.viewYMin ?? 0) * scale;
     const toNumber = (value: unknown) => (typeof value === "number" ? value : Number(value ?? 0));
 
     const result: Array<{ id: string; x: number; y: number; width: number; height: number; action: RuleActionRecord }> = [];
@@ -3134,8 +3307,8 @@ function MainSlideViewer({
       const hEmu = toNumber((bbox as any).h);
       if (wEmu <= 0 || hEmu <= 0) continue;
 
-      const cssX = (xEmu / EMU_PER_POINT) * scale;
-      const cssY = (yEmu / EMU_PER_POINT) * scale;
+      const cssX = (xEmu / EMU_PER_POINT) * scale - offsetX;
+      const cssY = (yEmu / EMU_PER_POINT) * scale - offsetY;
       const cssW = (wEmu / EMU_PER_POINT) * scale;
       const cssH = (hEmu / EMU_PER_POINT) * scale;
 
