@@ -2075,17 +2075,23 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
     setRedactBusy(false);
   }, [seed]);
 
-  const workingRender = previewEnabled && previewRender ? previewRender : render;
-  const activeDoc = workingRender?.doc ?? null;
-  const viewerKey = previewEnabled && previewRender ? "preview" : "original";
-  const thumbnailDoc = render?.doc ?? null;
+  const baseDoc = render?.doc ?? null;
+  const previewDoc = previewRender?.doc ?? null;
+  const activeDoc = previewEnabled && previewDoc ? previewDoc : baseDoc;
+  const viewerKey = previewEnabled && previewDoc ? `preview-${selectedPage}` : "original";
+  const thumbnailDoc = baseDoc;
+
+  const viewerPageNum = previewEnabled && previewDoc ? 1 : selectedPage;
 
   useEffect(() => {
-    if (!activeDoc) return;
-    if (selectedPage > activeDoc.numPages) {
-      setSelectedPage(activeDoc.numPages);
+    if (!baseDoc) return;
+    const maxPage = Math.max(1, baseDoc.numPages);
+    if (selectedPage > maxPage) {
+      setSelectedPage(maxPage);
+    } else if (selectedPage < 1) {
+      setSelectedPage(1);
     }
-  }, [activeDoc, selectedPage]);
+  }, [baseDoc, selectedPage]);
 
   useEffect(() => {
     if (previewEnabled) {
@@ -2124,7 +2130,7 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
   }, [previewEnabled, slideActions]);
 
   useEffect(() => {
-    if (!deckId || !previewEnabled || actionsLoading) {
+    if (!deckId || !previewEnabled || actionsLoading || slideActions.length === 0) {
       return;
     }
 
@@ -2250,9 +2256,12 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
                   onToggle={() => setPreviewEnabled((prev) => !prev)}
                   busy={previewEnabled && (previewLoading || actionsLoading)}
                   disabled={!previewAvailable}
-                  total={totalActions}
-                  current={currentSlideCount}
                 />
+                {previewEnabled && !previewLoading && !actionsLoading && currentSlideCount > 0 && (
+                  <span style={{ fontSize: 12, color: "#1d4ed8" }}>
+                    {`${currentSlideCount} redaction${currentSlideCount === 1 ? "" : "s"} displayed`}
+                  </span>
+                )}
                 {previewEnabled && previewLoading && (
                   <span style={{ fontSize: 12, color: "#64748b" }}>Generating preview…</span>
                 )}
@@ -2275,12 +2284,13 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
           <section style={{ minHeight: 0, position: "relative" }}>
             {activeDoc ? (
               <MainSlideViewer
-                key={`${viewerKey}-${previewEnabled ? "preview" : "plain"}`}
+                key={viewerKey}
                 doc={activeDoc}
-                pageNum={selectedPage}
+                pageNum={viewerPageNum}
                 highlights={slideActions}
                 previewEnabled={previewEnabled}
                 loadingHighlights={actionsLoading || previewLoading}
+                showHighlights={false}
               />
             ) : (
               <EmptyState message="Upload a .pptx to see a large preview here." />
@@ -3151,12 +3161,14 @@ function MainSlideViewer({
   highlights = [],
   previewEnabled = false,
   loadingHighlights = false,
+  showHighlights = true,
 }: {
   doc: PDFDocumentProxy;
   pageNum: number;
   highlights?: RuleActionRecord[];
   previewEnabled?: boolean;
   loadingHighlights?: boolean;
+  showHighlights?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -3307,6 +3319,7 @@ function MainSlideViewer({
   const overlayRects = useMemo(() => {
     if (
       !previewEnabled ||
+      !showHighlights ||
       !highlights.length ||
       renderInfo.width <= 0 ||
       renderInfo.cssScale <= 0 ||
@@ -3348,7 +3361,7 @@ function MainSlideViewer({
     }
 
     return result;
-  }, [previewEnabled, highlights, renderInfo.width, renderInfo.height, renderInfo.cssScale]);
+  }, [previewEnabled, showHighlights, highlights, renderInfo.width, renderInfo.height, renderInfo.cssScale]);
 
   return (
     <div
@@ -3385,7 +3398,7 @@ function MainSlideViewer({
           }}
         />
 
-        {previewEnabled && (
+        {previewEnabled && showHighlights && (
           <div
             style={{
               position: "absolute",
@@ -3466,19 +3479,13 @@ function PreviewToggleButton({
   onToggle,
   busy,
   disabled,
-  total,
-  current,
 }: {
   enabled: boolean;
   onToggle: () => void;
   busy?: boolean;
   disabled?: boolean;
-  total?: number;
-  current?: number;
 }) {
   const active = enabled && !disabled;
-  const hasTotal = typeof total === "number" && total > 0;
-  const currentCount = typeof current === "number" ? current : 0;
 
   let label = "Preview rules";
   if (disabled) {
@@ -3488,13 +3495,9 @@ function PreviewToggleButton({
   } else if (active) {
     if (busy) {
       label = "Loading…";
-    } else if (currentCount > 0) {
-      label = `Showing ${currentCount} change${currentCount === 1 ? "" : "s"}`;
     } else {
       label = "Previewing rules";
     }
-  } else if (hasTotal) {
-    label = `Preview rules (${total})`;
   }
 
   return (
