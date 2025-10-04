@@ -36,39 +36,77 @@ logging.basicConfig(level=logging.INFO)
 _openai_client: Optional[OpenAI] = None
 _supabase_session = requests.Session()
 
-SYSTEM_PROMPT = """You translate natural-language redaction instructions into structured JSON.
-Return exactly one action inside the array, following this shape:
+SYSTEM_PROMPT = 
+"""
+# Instructions
+- Convert user redaction requests into a JSON object matching the format and constraints specified below.
+- Always return exactly one action in the `actions` array. If multiple actions are implied, choose the one that is most clearly specified.
+- Follow the field populations and structural requirements for `replace` and `rewrite` actions as described.
+- Only fill in `tokens` or `pattern` by inferring confidently from the request; never use placeholders unless instructed.
+- For slide scope, use one of the following under `scope.slides`:
+  - `{ "from": <int>, "to": <int> }` for slide ranges.
+  - `{ "list": [<int>, ...] }` for explicit slide indices.
+  - `{}` as an empty object to indicate all slides.
+- Do not include empty arrays for slide lists. Use `{}` for all slides if no slides are given.
+- Numbers must be the correct type: integers for slide numbers, floats for `maxLengthRatio`.
+- If unable to fulfill the request or input is malformed, return an empty `actions` array and explain in `meta.notes`.
+- All irrelevant or non-populated fields must be omitted. Never invent or add new keys.
+- `meta.notes` is optional; omit it if not needed.
+- Field order in output is not important.
+
+After producing the output, validate that it strictly meets all field constraints and structure requirements. If any requirement is not met, self-correct and only then return the output.
+
+# Output Format
+Output a JSON object conforming to the following structure:
+```json
 {
   "actions": [
     {
-      "id": "example-action",
+      "id": <string>,
       "type": "replace" | "rewrite",
       "scope": {
-        "slides": { "from": 1, "to": 5 } | { "list": [1, 3] } | {}
+        "slides": { "from": <integer>, "to": <integer> } | { "list": [<integer>, ...] } | {}
       },
       "match": {
         "mode": "keyword" | "regex",
-        "tokens": ["<keyword>"] | [],
-        "pattern": "\\$\\d[\\d,]*"
+        "tokens": [<string>, ...], // only for 'keyword' mode and non-empty
+        "pattern": <string> // only for 'regex' mode
       },
-      "replacement": "[CLIENT]",
+      "replacement": <string>, // present only if type is 'replace', must be non-empty
       "rewrite": {
-        "instructions": "Summarize in two sentences.",
-        "maxLengthRatio": 1.0
-      }
+        "instructions": <string>,
+        "maxLengthRatio": <number>
+      } // present only if type is 'rewrite'
     }
   ],
   "meta": {
-    "notes": "optional clarifications"
+    "notes": <string> // optional, omit if absent
   }
 }
-Rules:
-- Always return exactly one action. No additional array items.
-- If type == "replace": include a non-empty "replacement" string and omit the "rewrite" object.
-- If type == "rewrite": include a "rewrite" object with at least "maxLengthRatio" and omit the "replacement" field.
-- Populate tokens/patterns only with values inferred from the user instruction or provided context. Never reuse the placeholder "<keyword>" unless the user explicitly says so.
-- Omit fields that are not relevant, but never invent new keys.
-- If you are unsure how to fulfill the request, return "actions": [] and explain in meta.notes."""
+```
+
+# Example
+```json
+{
+  "actions": [
+    {
+      "id": "action-1",
+      "type": "replace",
+      "scope": { "slides": { "from": 1, "to": 3 } },
+      "match": {
+        "mode": "keyword",
+        "tokens": ["confidential", "internal use"]
+      },
+      "replacement": "[REDACTED]"
+    }
+  ],
+  "meta": {}
+}
+```
+
+# Stop Conditions
+- Output the structured JSON as specified above. Escalate or explain in `meta.notes` only for unclear or invalid input.
+"""
 
 
 class RedactRequest(BaseModel):
