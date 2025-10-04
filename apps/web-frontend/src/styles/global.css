@@ -1,0 +1,81 @@
+:root {
+  --font-family-sans: "Inter", "SF Pro Display", "Segoe UI", sans-serif;
+  --color-bg: #0f172a;
+  --color-surface: #111827;
+  --color-surface-alt: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-border: rgba(148, 163, 184, 0.16);
+  --color-border-strong: rgba(15, 23, 42, 0.08);
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-text-inverse: #f8fafc;
+  --color-primary: #2563eb;
+  --color-primary-light: #dbeafe;
+  --color-accent: #6366f1;
+  --color-danger: #ef4444;
+  --color-success: #10b981;
+  --shadow-sm: 0 8px 20px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 16px 40px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.16);
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  font-family: var(--font-family-sans);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9) 0%, rgba(15, 23, 42, 0.45) 35%, rgba(241, 245, 249, 1) 100%);
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+input, select, textarea {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.4);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --space-6: 20px;
+    --space-7: 28px;
+  }
+}

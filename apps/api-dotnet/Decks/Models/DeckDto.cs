@@ -1,10 +1,11 @@
-// DTOs describing the extracted presentation deck, slides, and elements.
+namespace Dexter.WebApi.Decks.Models;
+
 using System;
 using System.Collections.Generic;
 
 public class DeckDto
 {
-    public string file { get; set; } = "";
+    public string file { get; set; } = string.Empty;
     public int slideCount { get; set; }
     public long slideWidthEmu { get; set; }
     public long slideHeightEmu { get; set; }
@@ -19,7 +20,7 @@ public class SlideDto
 
 public abstract class ElementDto
 {
-    public string key { get; set; } = "";
+    public string key { get; set; } = string.Empty;
     public uint id { get; set; }
     public string? name { get; set; }
     public BBox bbox { get; set; } = new();
@@ -69,5 +70,5 @@ public class BBox
 public class ParagraphDto
 {
     public int level { get; set; }
-    public string text { get; set; } = "";
+    public string text { get; set; } = string.Empty;
 }

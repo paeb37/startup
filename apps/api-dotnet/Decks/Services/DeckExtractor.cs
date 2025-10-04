@@ -1,18 +1,22 @@
-// PPTX parsing helpers: builds deck DTOs from OpenXML presentation parts.
+namespace Dexter.WebApi.Decks.Services;
+
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
+using Dexter.WebApi.Decks.Models;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 
-public static partial class Program
+/// <summary>
+/// PPTX parsing helpers: builds deck DTOs from OpenXML presentation parts.
+/// </summary>
+internal sealed class DeckExtractor
 {
-    private static DeckDto ExtractDeck(Stream pptxStream, string fileName)
+    public DeckDto Extract(Stream pptxStream, string fileName)
     {
         using var doc = PresentationDocument.Open(pptxStream, false);
         var presPart = doc.PresentationPart ?? throw new InvalidOperationException("Not a PPTX (no PresentationPart)");
@@ -42,7 +46,9 @@ public static partial class Program
 
             int z = 0;
             foreach (var child in spTree.ChildElements)
+            {
                 ExtractElements(child, slidePart, slideDto.elements, ref z);
+            }
 
             deck.slides.Add(slideDto);
         }
@@ -66,7 +72,7 @@ public static partial class Program
                         key = MakeKey(slidePart, "textbox", id),
                         id = id,
                         name = nv?.Name,
-                        bbox = ReadEffectiveBBox(sp, slidePart),
+                        bbox = ReadEffectiveBBox(sp.ShapeProperties, slidePart),
                         paragraphs = paragraphs,
                         z = z++
                     });
@@ -140,7 +146,9 @@ public static partial class Program
         else if (el is P.GroupShape grp)
         {
             foreach (var child in grp.ChildElements)
+            {
                 ExtractElements(child, slidePart, outList, ref z);
+            }
         }
     }
 
@@ -201,11 +209,15 @@ public static partial class Program
                     cellBox = cellBox
                 };
 
-                for (int rr = r; rr < Math.Min(r + rowSpan, rows); rr++)
-                    for (int cc = cOut; cc < Math.Min(cOut + colSpan, cols); cc++)
+                for (int rr = r; rr < Math.Min(rows, r + rowSpan); rr++)
+                {
+                    for (int cc = cOut; cc < Math.Min(cols, cOut + colSpan); cc++)
+                    {
                         covered[rr, cc] = true;
+                    }
+                }
 
-                cOut += colSpan;
+                cOut++;
             }
         }
 
@@ -222,183 +234,96 @@ public static partial class Program
         };
     }
 
-    private static long Sum(long[] arr, int start, int count)
+    private static List<ParagraphDto> ExtractParagraphs(OpenXmlCompositeElement? body)
     {
-        long total = 0;
-        int end = Math.Min(start + count, arr.Length);
-        for (int i = start; i < end; i++) total += arr[i];
-        return total;
+        var result = new List<ParagraphDto>();
+        if (body == null) return result;
+
+        foreach (var para in body.Elements<A.Paragraph>())
+        {
+            var text = new System.Text.StringBuilder();
+            foreach (var child in para.ChildElements)
+            {
+                switch (child)
+                {
+                    case A.Run run when run.Text != null:
+                        text.Append(run.Text.Text);
+                        break;
+                    case A.Break:
+                        text.Append('\n');
+                        break;
+                    case A.Field field when field.Text != null:
+                        text.Append(field.Text.Text);
+                        break;
+                }
+            }
+
+            var trimmed = text.ToString().TrimEnd();
+            if (trimmed.Length == 0) continue;
+
+            var level = para.ParagraphProperties?.Level?.Value ?? 0;
+            result.Add(new ParagraphDto { level = level, text = trimmed });
+        }
+
+        return result;
+    }
+
+    private static BBox ReadEffectiveBBox(P.ShapeProperties? sp, SlidePart _)
+    {
+        return sp?.Transform2D != null
+            ? ReadBBox(sp.Transform2D)
+            : new BBox();
+    }
+
+    private static BBox ReadEffectiveBBox(P.GraphicFrame frame, SlidePart _)
+    {
+        return frame.Transform != null
+            ? ReadBBox(frame.Transform)
+            : new BBox();
+    }
+
+    private static BBox ReadBBox(A.Transform2D? transform)
+    {
+        var offset = transform?.Offset;
+        var extents = transform?.Extents;
+        return new BBox
+        {
+            x = offset?.X?.Value,
+            y = offset?.Y?.Value,
+            w = extents?.Cx?.Value,
+            h = extents?.Cy?.Value
+        };
+    }
+
+    private static BBox ReadBBox(P.Transform? transform)
+    {
+        var offset = transform?.Offset;
+        var extents = transform?.Extents;
+        return new BBox
+        {
+            x = offset?.X?.Value,
+            y = offset?.Y?.Value,
+            w = extents?.Cx?.Value,
+            h = extents?.Cy?.Value
+        };
     }
 
     private static string MakeKey(SlidePart slidePart, string type, uint id)
+        => $"{slidePart.Uri.OriginalString.TrimStart('/')}{'#'}{type}{'#'}{id}";
+
+    private static long Sum(long[]? values, int start, int count)
     {
-        var uri = slidePart.Uri.OriginalString.TrimStart('/');
-        return $"{uri}#{type}:{id}";
-    }
-
-    private static BBox ReadEffectiveBBox(P.GraphicFrame gf, SlidePart slidePart)
-    {
-        var t = gf.Transform;
-        if (t != null) return ReadBBox(t);
-
-        var ph = gf.NonVisualGraphicFrameProperties?
-                .ApplicationNonVisualDrawingProperties?
-                .GetFirstChild<P.PlaceholderShape>();
-        if (ph == null) return new BBox();
-
-        var layoutTree = slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
-        var fromLayout = FindGraphicFramePlaceholderTransform(layoutTree, ph);
-        if (fromLayout != null) return ReadBBox(fromLayout);
-
-        var masterTree = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree;
-        var fromMaster = FindGraphicFramePlaceholderTransform(masterTree, ph);
-        if (fromMaster != null) return ReadBBox(fromMaster);
-
-        return new BBox();
-    }
-
-    private static P.Transform? FindGraphicFramePlaceholderTransform(P.ShapeTree? tree, P.PlaceholderShape phTarget)
-    {
-        if (tree == null) return null;
-
-        var targetType = phTarget.Type?.Value ?? P.PlaceholderValues.Body;
-        var targetIdx = phTarget.Index?.Value;
-
-        foreach (var g in tree.Descendants<P.GraphicFrame>())
+        if (values == null || values.Length == 0 || count <= 0)
         {
-            var ph = g.NonVisualGraphicFrameProperties?
-                    .ApplicationNonVisualDrawingProperties?
-                    .GetFirstChild<P.PlaceholderShape>();
-            if (ph == null) continue;
-
-            var candType = ph.Type?.Value ?? P.PlaceholderValues.Body;
-            var candIdx = ph.Index?.Value;
-
-            bool typeMatch = candType == targetType;
-            bool idxMatch = targetIdx == null || candIdx == targetIdx;
-
-            if (typeMatch && idxMatch)
-                return g.Transform;
+            return 0;
         }
-        return null;
-    }
 
-    private static BBox ReadBBox(P.Transform? t)
-    {
-        if (t == null) return new BBox();
-        return new BBox
+        long total = 0;
+        for (int i = 0; i < count && start + i < values.Length; i++)
         {
-            x = t.Offset?.X?.Value,
-            y = t.Offset?.Y?.Value,
-            w = t.Extents?.Cx?.Value,
-            h = t.Extents?.Cy?.Value
-        };
-    }
-
-    private static BBox ReadBBox(A.Transform2D? xfrm)
-    {
-        if (xfrm == null) return new BBox();
-        return new BBox
-        {
-            x = xfrm.Offset?.X?.Value,
-            y = xfrm.Offset?.Y?.Value,
-            w = xfrm.Extents?.Cx?.Value,
-            h = xfrm.Extents?.Cy?.Value
-        };
-    }
-
-    private static BBox ReadEffectiveBBox(P.Shape sp, SlidePart slidePart)
-    {
-        var xfrm = sp.ShapeProperties?.Transform2D;
-        if (xfrm != null) return ReadBBox(xfrm);
-
-        var ph = sp.NonVisualShapeProperties?
-                   .ApplicationNonVisualDrawingProperties?
-                   .GetFirstChild<P.PlaceholderShape>();
-        if (ph == null) return new BBox();
-
-        var layoutTree = slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
-        var fromLayout = FindPlaceholderTransform(layoutTree, ph);
-        if (fromLayout != null) return ReadBBox(fromLayout);
-
-        var masterTree = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree;
-        var fromMaster = FindPlaceholderTransform(masterTree, ph);
-        if (fromMaster != null) return ReadBBox(fromMaster);
-
-        return new BBox();
-    }
-
-    private static A.Transform2D? FindPlaceholderTransform(P.ShapeTree? tree, P.PlaceholderShape phTarget)
-    {
-        if (tree == null) return null;
-
-        var targetType = phTarget.Type?.Value ?? P.PlaceholderValues.Body;
-        var targetIdx = phTarget.Index?.Value;
-
-        foreach (var s in tree.Descendants<P.Shape>())
-        {
-            var ph = s.NonVisualShapeProperties?
-                       .ApplicationNonVisualDrawingProperties?
-                       .GetFirstChild<P.PlaceholderShape>();
-            if (ph == null) continue;
-
-            var candType = ph.Type?.Value ?? P.PlaceholderValues.Body;
-            var candIdx = ph.Index?.Value;
-
-            bool typeMatch = candType == targetType;
-            bool idxMatch = targetIdx == null || candIdx == targetIdx;
-
-            if (typeMatch && idxMatch)
-                return s.ShapeProperties?.Transform2D;
+            total += values[start + i];
         }
-        return null;
-    }
 
-    private static List<ParagraphDto> ExtractParagraphs(A.TextBody? tb)
-    {
-        var list = new List<ParagraphDto>();
-        if (tb == null) return list;
-
-        foreach (var p in tb.Elements<A.Paragraph>())
-        {
-            var sb = new StringBuilder();
-            foreach (var node in p.ChildElements)
-            {
-                if (node is A.Run run) sb.Append(run.Text?.Text ?? "");
-                else if (node is A.Break) sb.Append('\n');
-                else if (node is A.Field fld) sb.Append(fld.Text?.Text ?? "");
-            }
-
-            var text = sb.ToString().TrimEnd();
-            if (string.IsNullOrWhiteSpace(text)) continue;
-
-            int level = (int?)p.ParagraphProperties?.Level?.Value ?? 0;
-            list.Add(new ParagraphDto { level = level, text = text });
-        }
-        return list;
-    }
-
-    private static List<ParagraphDto> ExtractParagraphs(P.TextBody? tb)
-    {
-        var list = new List<ParagraphDto>();
-        if (tb == null) return list;
-
-        foreach (var p in tb.Elements<A.Paragraph>())
-        {
-            var sb = new StringBuilder();
-            foreach (var node in p.ChildElements)
-            {
-                if (node is A.Run run) sb.Append(run.Text?.Text ?? "");
-                else if (node is A.Break) sb.Append('\n');
-                else if (node is A.Field fld) sb.Append(fld.Text?.Text ?? "");
-            }
-
-            var text = sb.ToString().TrimEnd();
-            if (string.IsNullOrWhiteSpace(text)) continue;
-
-            int level = (int?)p.ParagraphProperties?.Level?.Value ?? 0;
-            list.Add(new ParagraphDto { level = level, text = text });
-        }
-        return list;
+        return total;
     }
 }
