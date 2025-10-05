@@ -38,7 +38,7 @@ _supabase_session = requests.Session()
 
 ENTITY_IDENTIFICATION_PROMPT = """
 # Instructions
-You are an expert at identifying sensitive information in documents.
+You are an expert at identifying sensitive information in documents. 
 
 Given:
 1. A redaction instruction from the user
@@ -47,35 +47,35 @@ Given:
 Your task:
 - Identify specific entities (names, numbers, etc.) that need simple replacement
 - Identify paragraphs that contain too much sensitive information and need complete rewriting
-- Return structured JSON with both types of redactions
+- Return structured JSON with both types of redactions. All keys must be present (use empty arrays if no results):
 
 # Output Format
 {
   "entity_redactions": [
     {
-      "entity": "Acme Corp",
-      "type": "client_name",
-      "confidence": 0.95,
-      "replacement": "[CLIENT]",
-      "evidence": "Mentioned as partner and revenue source across multiple slides"
+      "entity": string,           // The exact text to find (e.g., "Acme Corp")
+      "type": string,             // Category (e.g., "client_name", "email", "person_name")
+      "confidence": float,        // Must be > 0.85 (range 0.0-1.0)
+      "replacement": string,      // Placeholder token (e.g., "[CLIENT]")
+      "evidence": string          // Brief context explaining the identification
     }
   ],
   "paragraph_rewrites": [
     {
-      "slide_no": 3,
-      "original_text": "Full paragraph text that needs rewriting...",
-      "rewritten_text": "Generalized version without sensitive details...",
-      "reason": "Contains multiple sensitive details (client name, revenue, contact) better handled by rewriting",
-      "confidence": 0.92
+      "slide_no": integer,        // Slide number where paragraph appears (e.g. 3)
+      "original_text": string,    // Complete original paragraph text
+      "rewritten_text": string,   // Generalized version without sensitive details
+      "reason": string,           // Why rewriting is better than entity replacement
+      "confidence": float         // Must be > 0.85 (range 0.0-1.0)
     }
   ],
   "patterns": [
     {
-      "regex": "\\\\$\\\\d+(?:,\\\\d{3})*(?:\\\\.\\\\d{2})?[KMB]?",
-      "type": "financial_figure",
-      "confidence": 0.85,
-      "replacement": "[AMOUNT]",
-      "reason": "Pattern for currency amounts"
+      "regex": string,            // Regex pattern (e.g. "\\\\$\\\\d+(?:,\\\\d{3})*(?:\\\\.\\\\d{2})?[KMB]?")
+      "type": string,             // Pattern category (e.g., "financial_figure")
+      "confidence": float,        // Must be > 0.85 (range 0.0-1.0)
+      "replacement": string,      // Replacement token (e.g., "[AMOUNT]")
+      "reason": string            // Pattern explanation (e.g. "Pattern for currency amounts")
     }
   ]
 }
@@ -286,6 +286,14 @@ def call_responses_api(instructions: str, deck_samples: List[Dict[str, Any]]) ->
     logging.info("Samples sent to LLM:")
     for sample in deck_samples:
         logging.info(f"  Slide {sample.get('slide_no')}: {sample.get('text', '')[:100]}...")
+    
+    # DEBUG: Log full user prompt
+    logging.info("="*80)
+    logging.info("FULL USER PROMPT:")
+    logging.info(user_content)
+    logging.info("="*80)
+    logging.info(f"Instructions length: {len(instructions)}")
+    logging.info(f"Samples count: {len(deck_samples)}")
     
     response = client.responses.create(
         model=model,
