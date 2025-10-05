@@ -20,7 +20,7 @@ from supabase_client import fetch_deck_json
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-2025-08-07")
 EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -84,18 +84,28 @@ Your task:
 - Simple find-and-replace cases (names, specific numbers, identifiers)
 - Confidence > 0.85 to include
 - Provide appropriate replacement tokens
+- DO NOT redact: List numbers (1., 2., 3.), ordinals, page numbers, formatting numbers
+- FOCUS ON: Client names, client employees, engagement team names, financial amounts, production volumes, capacity figures, operational metrics, addresses
+- Note: Client names include company name and any people associated with the client or engagement team
 
 # Guidelines for Paragraph Rewrites
-- Use when paragraph has multiple sensitive details intertwined
+- Use when paragraph has multiple sensitive details intertwined OR when context remains identifiable after entity replacement
+- Trigger scenarios: Sentences with location+date+superlative combos (e.g., "Hawaii's largest since 1987")
 - Provide natural-sounding rewritten text that maintains tone and structure
 - Remove specifics, keep general meaning
 - Confidence > 0.85 to include
 
+# Guidelines for Patterns
+- Use patterns (regex) for structural data: emails, phone numbers, dates
+- Never use entity redaction for emails or phones - always use regex patterns to match complete format
+- Example: Email pattern should match entire email address, not just parts
+
 # When to Use Which
 - Entity redaction: "Revenue from Acme Corp: $45M" → "Revenue from [CLIENT]: [AMOUNT]"
-- Paragraph rewrite: Complex paragraph with multiple intertwined details → Fully rewritten text
+- Paragraph rewrite: "Acme is Hawaii's largest manufacturer since 1987" → "Client is a longstanding manufacturer"
+- Pattern: "contact@acme.com" → "[EMAIL]" (using regex, not keyword)
 
-Prefer entity redaction when possible. Use paragraph rewrite only when necessary for context preservation.
+Prefer entity redaction when possible. Use paragraph rewrite when context remains identifying. Use patterns for structural data.
 """
 
 
@@ -229,19 +239,42 @@ def extract_deck_samples(deck: Dict[str, Any], strategy: str = "balanced") -> Li
     
     return samples
 
+# max_chars is currently 1000, a LOT
 
-def _extract_slide_summary(slide: Dict[str, Any], slide_idx: int, max_chars: int = 300) -> Optional[Dict[str, Any]]:
-    """Extract first paragraph or first N characters from a slide."""
+def _extract_slide_summary(slide: Dict[str, Any], slide_idx: int, max_chars: int = 1000) -> Optional[Dict[str, Any]]:
+    """Extract comprehensive text from slide (all paragraphs, tables) up to max_chars."""
+    all_text = []
+    
     for element in slide.get("elements", []):
-        if element.get("type") == "textbox":
+        element_type = element.get("type")
+        
+        if element_type == "textbox":
+            # Get ALL paragraphs, not just first one
             paragraphs = element.get("paragraphs", [])
-            if paragraphs:
-                text = paragraphs[0].get("text", "")
+            for paragraph in paragraphs:
+                text = paragraph.get("text", "")
                 if text and text.strip():
-                    return {
-                        "slide_no": slide_idx + 1,
-                        "text": text[:max_chars]
-                    }
+                    all_text.append(text.strip())
+        
+        elif element_type == "table":
+            # Include table content (often contains client data)
+            for row in element.get("cells", []) or []:
+                for cell in row or []:
+                    if not cell:
+                        continue
+                    for paragraph in cell.get("paragraphs", []) or []:
+                        text = paragraph.get("text", "")
+                        if text and text.strip():
+                            all_text.append(text.strip())
+    
+    # Combine all text with line breaks
+    combined = "\n".join(all_text)
+    if combined:
+        return {
+            "slide_no": slide_idx + 1,
+            "text": combined[:max_chars]
+        }
+    
     return None
 
 
