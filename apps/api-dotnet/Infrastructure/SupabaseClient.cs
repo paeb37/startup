@@ -114,17 +114,19 @@ internal sealed class SupabaseClient
             var pdfBytes = await File.ReadAllBytesAsync(pdfPath, cancellationToken);
             OperationTimer.LogTiming("read pdf bytes", pdfReadSw.Elapsed, $"bytes {pdfBytes.Length}");
 
-            var imageCaptions = await _openAi.GenerateImageCaptionsAsync(
-                deck,
-                pptxPath,
-                deckId,
-                settings,
-                cancellationToken);
+            // COMMENTED OUT: Image captions and table summaries (speeds up upload)
+            var imageCaptions = new Dictionary<int, List<string>>();  // Empty dictionary instead of API call
+            // var imageCaptions = await _openAi.GenerateImageCaptionsAsync(
+            //     deck,
+            //     pptxPath,
+            //     deckId,
+            //     settings,
+            //     cancellationToken);
 
-            await _openAi.GenerateTableSummariesAsync(
-                deck,
-                settings,
-                cancellationToken);
+            // await _openAi.GenerateTableSummariesAsync(
+            //     deck,
+            //     settings,
+            //     cancellationToken);
 
             var deckFolder = deckId.ToString("n");
             var objectPrefix = string.IsNullOrWhiteSpace(settings.StoragePathPrefix)
@@ -316,20 +318,21 @@ internal sealed class SupabaseClient
 
             var combined = DeckContentFormatter.CombineSlideContent(text, captions, tableSummaries);
 
+            // COMMENTED OUT: Embeddings generation (speeds up upload)
             float[]? embedding = null;
-            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(combined))
-            {
-                embeddingAttempts++;
-                embedding = await _openAi.TryGenerateEmbeddingAsync(
-                    combined,
-                    settings.OpenAiKey!,
-                    settings.EmbeddingModel,
-                    cancellationToken);
-                if (embedding != null)
-                {
-                    embeddingSuccess++;
-                }
-            }
+            // if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(combined))
+            // {
+            //     embeddingAttempts++;
+            //     embedding = await _openAi.TryGenerateEmbeddingAsync(
+            //         combined,
+            //         settings.OpenAiKey!,
+            //         settings.EmbeddingModel,
+            //         cancellationToken);
+            //     if (embedding != null)
+            //     {
+            //         embeddingSuccess++;
+            //     }
+            // }
 
             slidePayload.Add(new
             {
@@ -468,6 +471,9 @@ internal sealed class SupabaseClient
         return JsonSerializer.Deserialize<DeckRecord>(doc.RootElement[0].GetRawText());
     }
 
+    /**
+    Get the rule action stored in supabase, stored by the python layer
+    */
     public async Task<List<RuleActionRecord>> FetchRuleActionsAsync(
         Guid deckId,
         SupabaseSettings settings,

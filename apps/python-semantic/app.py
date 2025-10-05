@@ -36,76 +36,66 @@ logging.basicConfig(level=logging.INFO)
 _openai_client: Optional[OpenAI] = None
 _supabase_session = requests.Session()
 
-SYSTEM_PROMPT = 
-"""
+ENTITY_IDENTIFICATION_PROMPT = """
 # Instructions
-- Convert user redaction requests into a JSON object matching the format and constraints specified below.
-- Always return exactly one action in the `actions` array. If multiple actions are implied, choose the one that is most clearly specified.
-- Follow the field populations and structural requirements for `replace` and `rewrite` actions as described.
-- Only fill in `tokens` or `pattern` by inferring confidently from the request; never use placeholders unless instructed.
-- For slide scope, use one of the following under `scope.slides`:
-  - `{ "from": <int>, "to": <int> }` for slide ranges.
-  - `{ "list": [<int>, ...] }` for explicit slide indices.
-  - `{}` as an empty object to indicate all slides.
-- Do not include empty arrays for slide lists. Use `{}` for all slides if no slides are given.
-- Numbers must be the correct type: integers for slide numbers, floats for `maxLengthRatio`.
-- If unable to fulfill the request or input is malformed, return an empty `actions` array and explain in `meta.notes`.
-- All irrelevant or non-populated fields must be omitted. Never invent or add new keys.
-- `meta.notes` is optional; omit it if not needed.
-- Field order in output is not important.
+You are an expert at identifying sensitive information in documents.
 
-After producing the output, validate that it strictly meets all field constraints and structure requirements. If any requirement is not met, self-correct and only then return the output.
+Given:
+1. A redaction instruction from the user
+2. Sample content from a presentation deck
+
+Your task:
+- Identify specific entities (names, numbers, etc.) that need simple replacement
+- Identify paragraphs that contain too much sensitive information and need complete rewriting
+- Return structured JSON with both types of redactions
 
 # Output Format
-Output a JSON object conforming to the following structure:
-```json
 {
-  "actions": [
+  "entity_redactions": [
     {
-      "id": <string>,
-      "type": "replace" | "rewrite",
-      "scope": {
-        "slides": { "from": <integer>, "to": <integer> } | { "list": [<integer>, ...] } | {}
-      },
-      "match": {
-        "mode": "keyword" | "regex",
-        "tokens": [<string>, ...], // only for 'keyword' mode and non-empty
-        "pattern": <string> // only for 'regex' mode
-      },
-      "replacement": <string>, // present only if type is 'replace', must be non-empty
-      "rewrite": {
-        "instructions": <string>,
-        "maxLengthRatio": <number>
-      } // present only if type is 'rewrite'
+      "entity": "Acme Corp",
+      "type": "client_name",
+      "confidence": 0.95,
+      "replacement": "[CLIENT]",
+      "evidence": "Mentioned as partner and revenue source across multiple slides"
     }
   ],
-  "meta": {
-    "notes": <string> // optional, omit if absent
-  }
-}
-```
-
-# Example
-```json
-{
-  "actions": [
+  "paragraph_rewrites": [
     {
-      "id": "action-1",
-      "type": "replace",
-      "scope": { "slides": { "from": 1, "to": 3 } },
-      "match": {
-        "mode": "keyword",
-        "tokens": ["confidential", "internal use"]
-      },
-      "replacement": "[REDACTED]"
+      "slide_no": 3,
+      "original_text": "Full paragraph text that needs rewriting...",
+      "rewritten_text": "Generalized version without sensitive details...",
+      "reason": "Contains multiple sensitive details (client name, revenue, contact) better handled by rewriting",
+      "confidence": 0.92
     }
   ],
-  "meta": {}
+  "patterns": [
+    {
+      "regex": "\\\\$\\\\d+(?:,\\\\d{3})*(?:\\\\.\\\\d{2})?[KMB]?",
+      "type": "financial_figure",
+      "confidence": 0.85,
+      "replacement": "[AMOUNT]",
+      "reason": "Pattern for currency amounts"
+    }
+  ]
 }
-```
 
-# Stop Conditions
-- Output the structured JSON as specified above. Escalate or explain in `meta.notes` only for unclear or invalid input.
+# Guidelines for Entity Redactions
+- Simple find-and-replace cases (names, specific numbers, identifiers)
+- Confidence > 0.85 to include
+- Provide appropriate replacement tokens
+
+# Guidelines for Paragraph Rewrites
+- Use when paragraph has multiple sensitive details intertwined
+- Provide natural-sounding rewritten text that maintains tone and structure
+- Remove specifics, keep general meaning
+- Confidence > 0.85 to include
+
+# When to Use Which
+- Entity redaction: "Revenue from Acme Corp: $45M" → "Revenue from [CLIENT]: [AMOUNT]"
+- Paragraph rewrite: Complex paragraph with multiple intertwined details → Fully rewritten text
+
+Prefer entity redaction when possible. Use paragraph rewrite only when necessary for context preservation.
 """
 
 
@@ -195,70 +185,225 @@ def interpret_instructions(instructions: str) -> List[Dict[str, object]]:
     return actions
 
 
-def build_user_prompt(instructions: str) -> str:
+def extract_deck_samples(deck: Dict[str, Any], strategy: str = "balanced") -> List[Dict[str, Any]]:
+    """Extract representative content samples from deck."""
+    slides = deck.get("slides", [])
+    total_slides = len(slides)
+    samples = []
+    
+    if total_slides == 0:
+        return samples
+    
+    # For small decks, sample all slides
+    if total_slides <= 5:
+        for i in range(total_slides):
+            sample = _extract_slide_summary(slides[i], i)
+            if sample:
+                samples.append(sample)
+        return samples
+    
+    # Balanced strategy: first 3 + random 20% middle + last
+    # First 3 slides
+    for i in range(min(3, total_slides)):
+        sample = _extract_slide_summary(slides[i], i)
+        if sample:
+            samples.append(sample)
+    
+    # Sample 20% from middle
+    if total_slides > 4:
+        import random
+        middle_start = 3
+        middle_end = total_slides - 1
+        sample_count = max(1, int((middle_end - middle_start) * 0.2))
+        sampled_indices = random.sample(range(middle_start, middle_end), min(sample_count, middle_end - middle_start))
+        for idx in sampled_indices:
+            sample = _extract_slide_summary(slides[idx], idx)
+            if sample:
+                samples.append(sample)
+    
+    # Last slide
+    if total_slides > 3:
+        sample = _extract_slide_summary(slides[-1], total_slides - 1)
+        if sample:
+            samples.append(sample)
+    
+    return samples
+
+
+def _extract_slide_summary(slide: Dict[str, Any], slide_idx: int, max_chars: int = 300) -> Optional[Dict[str, Any]]:
+    """Extract first paragraph or first N characters from a slide."""
+    for element in slide.get("elements", []):
+        if element.get("type") == "textbox":
+            paragraphs = element.get("paragraphs", [])
+            if paragraphs:
+                text = paragraphs[0].get("text", "")
+                if text and text.strip():
+                    return {
+                        "slide_no": slide_idx + 1,
+                        "text": text[:max_chars]
+                    }
+    return None
+
+
+def format_samples_for_llm(samples: List[Dict[str, Any]]) -> str:
+    """Format samples into readable string for LLM prompt."""
+    formatted = []
+    for sample in samples:
+        slide_no = sample.get("slide_no")
+        text = sample.get("text", "")
+        if text and text != "(empty)":
+            formatted.append(f"Slide {slide_no}: {text}")
+    return "\n\n".join(formatted)
+
+
+def build_user_prompt_with_samples(instructions: str, deck_samples: List[Dict[str, Any]]) -> str:
+    """Build user prompt including instruction and deck samples."""
     prompt_parts = [
         "# Instruction",
         instructions.strip() or "(none provided)",
-        "\n# Output format",
-        "Return strictly the JSON object described in the system message.",
+        "\n# Deck Content Samples",
+        format_samples_for_llm(deck_samples),
+        "\n# Task",
+        "Analyze the deck samples and identify:",
+        "1. Specific entities (names, numbers) that need simple replacement",
+        "2. Paragraphs that need complete rewriting due to intertwined sensitive details",
+        "3. Patterns (like financial figures) that apply broadly",
+        "\nReturn structured JSON as specified in the system message."
     ]
     return "\n".join(prompt_parts)
 
 
-def call_responses_api(instructions: str) -> Tuple[Dict[str, object], Dict[str, object]]:
+def call_responses_api(instructions: str, deck_samples: List[Dict[str, Any]]) -> Tuple[Dict[str, object], Dict[str, object]]:
+    """Use LLM to identify entities and paragraphs to redact from deck samples."""
     client = _get_openai_client()
     model = os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
-
+    
     started = perf_counter()
+    
+    user_content = build_user_prompt_with_samples(instructions, deck_samples)
+    
+    # DEBUG: Log samples sent to LLM
+    logging.info("Samples sent to LLM:")
+    for sample in deck_samples:
+        logging.info(f"  Slide {sample.get('slide_no')}: {sample.get('text', '')[:100]}...")
+    
     response = client.responses.create(
         model=model,
-        instructions=SYSTEM_PROMPT,
-        input=[
-            {
-                "role": "user",
-                "content": build_user_prompt(instructions),
-            }
-        ],
+        instructions=ENTITY_IDENTIFICATION_PROMPT,
+        input=[{
+            "role": "user",
+            "content": user_content
+        }]
     )
+    
     latency = perf_counter() - started
-
-    meta = {"source": "llm", "model": model, "responseSeconds": round(latency, 3)}
-
+    meta = {
+        "source": "llm_entity_extraction",
+        "model": model,
+        "responseSeconds": round(latency, 3),
+        "samplesProvided": len(deck_samples)
+    }
+    
     try:
         parsed = json.loads(response.output_text)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"invalid JSON from model: {exc}")
-
+    
     return parsed, meta
 
 
-def _select_valid_action(actions: List[Dict[str, object]]) -> Optional[Dict[str, object]]:
-    """Pick the first action that satisfies type-specific requirements."""
-
-    for action in actions:
-        if not isinstance(action, dict):
+def convert_llm_response_to_actions(llm_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert LLM entity identification + paragraph rewrites to unified action format."""
+    actions = []
+    
+    # Convert entity redactions to keyword actions
+    entity_redactions = llm_result.get("entity_redactions", [])
+    for entity_redaction in entity_redactions:
+        if entity_redaction.get("confidence", 0) < 0.85:
             continue
-
-        action_type = action.get("type")
-        if action_type == "replace":
-            replacement = action.get("replacement")
-            if isinstance(replacement, str) and replacement.strip():
-                # Ensure rewrite block is absent
-                action = dict(action)
-                action.pop("rewrite", None)
-                return action
-        elif action_type == "rewrite":
-            rewrite = action.get("rewrite")
-            if isinstance(rewrite, dict) and "maxLengthRatio" in rewrite:
-                action = dict(action)
-                action.pop("replacement", None)
-                return action
-
-    return None
+        
+        actions.append({
+            "id": f"entity-{len(actions)}",
+            "type": "replace",
+            "scope": {},
+            "match": {
+                "mode": "keyword",
+                "tokens": [entity_redaction["entity"]]
+            },
+            "replacement": entity_redaction.get("replacement", "[REDACTED]"),
+            "metadata": {
+                "confidence": entity_redaction.get("confidence"),
+                "entity_type": entity_redaction.get("type"),
+                "evidence": entity_redaction.get("evidence"),
+                "source": "llm_entity_extraction",
+                "action_category": "entity_replacement"
+            }
+        })
+    
+    # Convert paragraph rewrites to exact match actions
+    paragraph_rewrites = llm_result.get("paragraph_rewrites", [])
+    for rewrite in paragraph_rewrites:
+        if rewrite.get("confidence", 0) < 0.85:
+            continue
+        
+        slide_no = rewrite.get("slide_no")
+        actions.append({
+            "id": f"rewrite-{len(actions)}",
+            "type": "replace",
+            "scope": {"slides": {"list": [slide_no]}} if slide_no else {},
+            "match": {
+                "mode": "exact",
+                "text": rewrite["original_text"]
+            },
+            "replacement": rewrite["rewritten_text"],
+            "metadata": {
+                "confidence": rewrite.get("confidence"),
+                "reason": rewrite.get("reason"),
+                "source": "llm_paragraph_rewrite",
+                "action_category": "paragraph_rewrite"
+            }
+        })
+    
+    # Convert patterns to regex actions
+    patterns = llm_result.get("patterns", [])
+    for pattern in patterns:
+        if pattern.get("confidence", 0) < 0.85:
+            continue
+        
+        actions.append({
+            "id": f"pattern-{len(actions)}",
+            "type": "replace",
+            "scope": {},
+            "match": {
+                "mode": "regex",
+                "pattern": pattern["regex"]
+            },
+            "replacement": pattern.get("replacement", "[REDACTED]"),
+            "metadata": {
+                "confidence": pattern.get("confidence"),
+                "pattern_type": pattern.get("type"),
+                "reason": pattern.get("reason"),
+                "source": "llm_pattern_extraction",
+                "action_category": "pattern_match"
+            }
+        })
+    
+    return actions
 
 
 @app.post("/redact")
 def redact():
+    """
+    This is the main method called by the frontend service
+
+    Frontend hits /upload on C#, which parses OpenXML and extracts the deck content.
+    Creates the JSON, stores in Supabase, returns to frontend
+
+    Frontend hits /redact and passes in the deckID, query, and deck JSON
+
+    
+    
+    """
     try:
         data = request.get_json(force=True, silent=False)
         payload = RedactRequest.model_validate(data)
@@ -269,33 +414,40 @@ def redact():
 
     deck_id = payload.deckId
     instructions = payload.instructions.strip()
-    deck = payload.deck
+    deck = payload.deck # Full JSON structure
 
     if not instructions:
         return jsonify({"error": "instructions required"}), 400
 
-    actions = interpret_instructions(instructions)
-    meta: Dict[str, object] = {"source": "heuristic" if actions else "none"}
-
-    if instructions:
-        try:
-            llm_result, llm_meta = call_responses_api(instructions)
-            if isinstance(llm_result, dict):
-                llm_actions = llm_result.get("actions")
-                if isinstance(llm_actions, list) and llm_actions:
-                    validated = _select_valid_action(llm_actions)
-                    if validated is not None:
-                        actions = [validated]
-                        meta = {}
-                llm_meta_payload = llm_result.get("meta")
-                if isinstance(llm_meta_payload, dict):
-                    llm_meta.update(llm_meta_payload)
-            meta.update(llm_meta)
-        except Exception as ex:
-            logging.error("LLM instruction parsing failed: %s", ex)
-            meta = {"source": "fallback", "error": str(ex)}
+    # Extract samples and call LLM with deck content
+    try:
+        deck_samples = extract_deck_samples(deck, strategy="balanced")
+        logging.info(f"Extracted {len(deck_samples)} samples from deck")
+        
+        # CALL LLM HERE
+        llm_result, llm_meta = call_responses_api(instructions, deck_samples)
+        
+        # DEBUG: Log what LLM identified
+        logging.info(f"LLM Result: {json.dumps(llm_result, indent=2)}")
+        
+        actions = convert_llm_response_to_actions(llm_result)
+        
+        # DEBUG: Log generated actions
+        logging.info(f"Generated {len(actions)} actions:")
+        for i, action in enumerate(actions):
+            logging.info(f"  Action {i+1}: {json.dumps(action, indent=2)}")
+        
+        meta = llm_meta
+    except Exception as ex:
+        logging.error("LLM entity identification failed: %s", ex)
+        # Fallback to heuristic
+        actions = interpret_instructions(instructions)
+        meta = {"source": "fallback_heuristic", "error": str(ex)}
 
     generated_actions = generate_rule_actions(deck, actions)
+    
+    # DEBUG: Log how many rule actions were generated
+    logging.info(f"Generated {len(generated_actions)} rule_actions to apply")
 
     try:
         title = generate_rule_title(instructions)
@@ -605,9 +757,10 @@ def generate_answer(question: str, contexts: List[Dict[str, Any]]) -> str:
         input=[
             {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
-        ],
-        temperature=0.3,
+        ]
     )
+
+    # removed temperature param
 
     return response.output_text.strip()
 
@@ -645,6 +798,24 @@ def answer_question(question: str) -> Tuple[str, List[Dict[str, Any]]]:
 
 
 def generate_rule_actions(deck: Dict[str, Any], actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    This is the KEY translation
+    
+    Takes LLM's abstract action like:
+      { "match": { "tokens": ["Acme Corp"] }, "replacement": "[REDACTED]" }
+    
+    And converts it to concrete replacements:
+      [
+        { slide_no: 3, element_key: "...", original_text: "Revenue from Acme Corp", 
+          new_text: "Revenue from [REDACTED]" },
+        { slide_no: 7, element_key: "...", original_text: "Acme Corp partnership", 
+          new_text: "[REDACTED] partnership" },
+        ...
+      ]
+
+    The element key is the specific textbox #
+    ppt/slides/slide5.xml#textbox#5
+    """
     if not actions:
         return []
 
@@ -662,6 +833,7 @@ def generate_rule_actions(deck: Dict[str, Any], actions: List[Dict[str, Any]]) -
 
         elements = slide.get("elements") or []
         for element in elements:
+            # for now we only focus on the textbox
             if element.get("type") != "textbox":
                 continue
 
@@ -679,6 +851,7 @@ def generate_rule_actions(deck: Dict[str, Any], actions: List[Dict[str, Any]]) -
 
                 new_text = original_text
                 changed = False
+                applied_action_metadata = None
 
                 for action in actions:
                     if not slide_in_scope(action.get("scope"), slide_no):
@@ -687,17 +860,23 @@ def generate_rule_actions(deck: Dict[str, Any], actions: List[Dict[str, Any]]) -
                     new_text, action_changed = apply_text_action(new_text, action)
                     if action_changed:
                         changed = True
+                        applied_action_metadata = action.get("metadata")
+                        break  # Stop after first match
 
                 if changed and new_text != original_text:
-                    results.append(
-                        {
-                            "slide_no": slide_no,
-                            "element_key": element_key,
-                            "bbox": bbox,
-                            "original_text": original_text,
-                            "new_text": new_text,
-                        }
-                    )
+                    result = {
+                        "slide_no": slide_no,
+                        "element_key": element_key,
+                        "bbox": bbox,
+                        "original_text": original_text,
+                        "new_text": new_text,
+                    }
+                    
+                    # Include metadata if available
+                    if applied_action_metadata:
+                        result["metadata"] = applied_action_metadata
+                    
+                    results.append(result)
 
     return results
 
@@ -741,6 +920,7 @@ def slide_in_scope(scope: Optional[Dict[str, Any]], slide_no: int) -> bool:
 
 
 def apply_text_action(text: str, action: Dict[str, Any]) -> Tuple[str, bool]:
+    """Apply action to text. Supports keyword, regex, and exact match modes."""
     replacement = action.get("replacement")
     if not isinstance(replacement, str) or not replacement.strip():
         replacement = "[REDACTED]"
@@ -751,6 +931,15 @@ def apply_text_action(text: str, action: Dict[str, Any]) -> Tuple[str, bool]:
     updated_text = text
     changed = False
 
+    # Exact match mode (for paragraph rewrites)
+    if mode == "exact":
+        exact_text = match.get("text", "")
+        if exact_text and text.strip() == exact_text.strip():
+            updated_text = replacement
+            changed = True
+        return updated_text, changed
+
+    # Regex match mode
     if mode == "regex":
         pattern = match.get("pattern")
         if isinstance(pattern, str) and pattern.strip():
@@ -761,6 +950,8 @@ def apply_text_action(text: str, action: Dict[str, Any]) -> Tuple[str, bool]:
                     changed = updated_text != text
             except re.error as exc:
                 logging.warning("Invalid regex pattern '%s': %s", pattern, exc)
+    
+    # Keyword match mode (default)
     else:
         tokens = match.get("tokens") or []
         token_list = [t.strip() for t in tokens if isinstance(t, str) and t.strip()]
@@ -789,8 +980,7 @@ def generate_rule_title(instructions: str) -> str:
     try:
         response = client.responses.create(
             model=os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
-            input=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+            input=[{"role": "user", "content": prompt}]
         )
         summary = response.output_text.strip()
         if summary:
@@ -805,6 +995,12 @@ def generate_rule_title(instructions: str) -> str:
 
 
 def insert_rule(deck_id: str, title: str, instructions: str) -> str:
+    """
+    Put the rule into Supabase
+    Later fetched by the C# service
+
+    """
+
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError("Supabase configuration missing")
 

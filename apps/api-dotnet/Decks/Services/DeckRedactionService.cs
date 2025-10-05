@@ -12,7 +12,10 @@ using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 
 internal sealed class DeckRedactionService
-{
+{   
+    /**
+    Apply the rules to PPTX
+    */
     public byte[] ApplyRuleActionsToPptx(
         byte[] originalBytes,
         IReadOnlyList<RuleActionRecord> actions,

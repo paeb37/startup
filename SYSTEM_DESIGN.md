@@ -410,63 +410,6 @@ $$;
 
 ---
 
-## Technologies
-
-### Backend
-- **ASP.NET Core 9**: Web framework, OpenXML processing
-- **Python Flask**: AI orchestration
-- **DocumentFormat.OpenXml**: PPTX parsing/manipulation
-- **Docnet.Core**: PDF rendering (PDFium wrapper)
-- **OpenAI SDK**: Embeddings, vision, chat
-
-### Frontend
-- **React 18 + TypeScript**: UI framework
-- **Vite**: Build tool
-- **react-pdf**: PDF.js wrapper for slide rendering
-
-### Infrastructure
-- **Supabase**: PostgreSQL + pgvector + Storage
-- **OpenAI API**: text-embedding-3-small, gpt-4o-mini, gpt-4.1-mini
-- **LibreOffice**: Document conversion (Docker container)
-
----
-
-## Configuration
-
-### Environment Variables
-
-**Core Services**
-```bash
-# Supabase
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbG...
-SUPABASE_STORAGE_BUCKET=decks
-SUPABASE_DECKS_TABLE=decks
-SUPABASE_SLIDES_TABLE=slides
-SUPABASE_RULES_TABLE=rules
-SUPABASE_RULE_ACTIONS_TABLE=rule_actions
-
-# OpenAI
-OPENAI_API_KEY=sk-...
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_VISION_MODEL=gpt-4o-mini
-OPENAI_MODEL=gpt-4.1-mini
-
-# Services
-LIBRE_CONVERTER_URL=http://127.0.0.1:5019
-SLIDE_IMAGE_BASE=http://localhost:5100
-```
-
-**Frontend (.env.local)**
-```bash
-VITE_API_URL=http://localhost:5100
-VITE_PYTHON_URL=http://localhost:8000
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbG...
-```
-
----
-
 ## Local Development
 
 ```bash
@@ -551,4 +494,18 @@ Keeps LibreOffice process alive for ~15x faster conversions (0.5s vs 8s).
 
 ---
 
-*Last updated: October 5, 2025*
+# Redaction Flow
+
+User submits natural language
+         ↓
+    Python Flask
+         ↓
+    LLM (gpt-4.1-mini, NOT gpt-5)
+         ↓
+  Structured JSON (action definition)
+         ↓
+  Python generates rule_actions
+         ↓
+  Saves to Supabase database
+         ↓
+  C# fetches & applies later
