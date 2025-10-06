@@ -20,7 +20,7 @@ from supabase_client import fetch_deck_json
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-2025-08-07")
+DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini-2025-08-07")
 EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -90,7 +90,7 @@ Your task:
 
 # Guidelines for Paragraph Rewrites
 - Use when paragraph has multiple sensitive details intertwined OR when context remains identifiable after entity replacement
-- Trigger scenarios: Sentences with location+date+superlative combos (e.g., "Hawaii's largest since 1987")
+- Trigger scenarios: Sentences with any location, date, or superlative combos (e.g., "Gripe is Hawaii's largest industrial equipment manufacturer, operating since 1987.")
 - Provide natural-sounding rewritten text that maintains tone and structure
 - Remove specifics, keep general meaning
 - Confidence > 0.85 to include
