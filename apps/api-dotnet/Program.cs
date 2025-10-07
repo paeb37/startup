@@ -5,8 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Dexter.WebApi.Decks;
 using Dexter.WebApi.Decks.Services;
 using Dexter.WebApi.Infrastructure;
-using Dexter.WebApi.Infrastructure.Options;
-using Microsoft.Extensions.Options;
 
 namespace Dexter.WebApi;
 
@@ -29,18 +27,6 @@ public static partial class Program
 
         var builder = WebApplication.CreateBuilder(args);
 
-        builder.Services.AddOptions<SupabaseOptions>()
-            .Bind(builder.Configuration.GetSection("Supabase"))
-            .PostConfigure(options => options.ApplyEnvironmentFallbacks());
-
-        builder.Services.AddOptions<OpenAiOptions>()
-            .Bind(builder.Configuration.GetSection("OpenAI"))
-            .PostConfigure(options => options.ApplyEnvironmentFallbacks());
-
-        builder.Services.AddOptions<ConverterOptions>()
-            .Bind(builder.Configuration.GetSection("Converter"))
-            .PostConfigure(options => options.ApplyEnvironmentFallbacks());
-
         builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
             p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
         builder.Services.AddMemoryCache();
@@ -50,19 +36,7 @@ public static partial class Program
 
         builder.Services.AddHttpClient<OpenAiClient>();
         builder.Services.AddHttpClient<SupabaseClient>();
-        builder.Services.AddHttpClient<ConverterClient>((sp, client) =>
-        {
-            var options = sp.GetRequiredService<IOptions<ConverterOptions>>().Value;
-            if (!string.IsNullOrWhiteSpace(options.BaseUrl) && Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri))
-            {
-                client.BaseAddress = baseUri;
-            }
-
-            if (options.TimeoutSeconds > 0)
-            {
-                client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
-            }
-        });
+        builder.Services.AddHttpClient<ConverterClient>();
 
         var app = builder.Build();
         app.UseCors();
