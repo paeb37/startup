@@ -229,12 +229,10 @@ internal sealed class DeckRedactionService
             return true;
         }
 
-        if (string.Equals(a.Trim(), b.Trim(), StringComparison.Ordinal))
-        {
-            return true;
-        }
+        var normalizedA = NormalizeWhitespace(RemoveListMarkers(a));
+        var normalizedB = NormalizeWhitespace(RemoveListMarkers(b));
 
-        return string.Equals(NormalizeWhitespace(a), NormalizeWhitespace(b), StringComparison.Ordinal);
+        return string.Equals(normalizedA, normalizedB, StringComparison.Ordinal);
     }
 
     private static string NormalizeWhitespace(string value)
@@ -259,6 +257,19 @@ internal sealed class DeckRedactionService
         }
 
         return sb.ToString().Trim();
+    }
+
+    private static string RemoveListMarkers(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value
+            .Replace('\u2022', ' ')
+            .Replace('\u2023', ' ')
+            .Replace('\u25E6', ' ');
     }
 
     private static bool TryParseElementKey(string elementKey, out ElementKeyInfo info)
