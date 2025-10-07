@@ -49,13 +49,13 @@ Your task:
 - Identify paragraphs that contain too much sensitive information and need complete rewriting
 - Return structured JSON with both types of redactions. All keys must be present (use empty arrays if no results):
 
-# Output Format
+# Output Format (return valid JSON with valid values only)
 {
   "entity_redactions": [
     {
       "entity": string,           // The exact text to find (e.g., "Acme Corp")
       "type": string,             // Category (e.g., "client_name", "email", "person_name")
-      "confidence": float,        // Must be > 0.85 (range 0.0-1.0)
+      "confidence": float,        // MUST be numeric like 0.95 or 0.87 (NOT words like "ninety")
       "replacement": string,      // Placeholder token (e.g., "[CLIENT]")
       "evidence": string          // Brief context explaining the identification
     }
@@ -66,14 +66,14 @@ Your task:
       "original_text": string,    // Complete original paragraph text
       "rewritten_text": string,   // Generalized version without sensitive details
       "reason": string,           // Why rewriting is better than entity replacement
-      "confidence": float         // Must be > 0.85 (range 0.0-1.0)
+      "confidence": float         // MUST be numeric like 0.95 (NOT words)
     }
   ],
   "patterns": [
     {
       "regex": string,            // Regex pattern (e.g. "\\\\$\\\\d+(?:,\\\\d{3})*(?:\\\\.\\\\d{2})?[KMB]?")
       "type": string,             // Pattern category (e.g., "financial_figure")
-      "confidence": float,        // Must be > 0.85 (range 0.0-1.0)
+      "confidence": float,        // MUST be numeric like 0.95 (NOT words)
       "replacement": string,      // Replacement token (e.g., "[AMOUNT]")
       "reason": string            // Pattern explanation (e.g. "Pattern for currency amounts")
     }
@@ -104,8 +104,6 @@ Your task:
 - Entity redaction: "Revenue from Acme Corp: $45M" → "Revenue from [CLIENT]: [AMOUNT]"
 - Paragraph rewrite: "Acme is Hawaii's largest manufacturer since 1987" → "Client is a longstanding manufacturer"
 - Pattern: "contact@acme.com" → "[EMAIL]" (using regex, not keyword)
-
-Prefer entity redaction when possible. Use paragraph rewrite when context remains identifying. Use patterns for structural data.
 """
 
 
@@ -348,6 +346,10 @@ def call_responses_api(instructions: str, deck_samples: List[Dict[str, Any]]) ->
     try:
         parsed = json.loads(response.output_text)
     except json.JSONDecodeError as exc:
+        logging.error("="*80)
+        logging.error("MALFORMED JSON FROM LLM:")
+        logging.error(response.output_text)
+        logging.error("="*80)
         raise RuntimeError(f"invalid JSON from model: {exc}")
     
     return parsed, meta
