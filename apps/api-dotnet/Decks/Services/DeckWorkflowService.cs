@@ -303,9 +303,9 @@ internal sealed class DeckWorkflowService
         return Results.Content(payload, "application/json");
     }
 
-    public async Task<IResult> PreviewDeckAsync(Guid deckId, PreviewRequest? payload, CancellationToken cancellationToken)
+    public async Task<IResult> PreviewDeckAsync(Guid deckId, int slide, CancellationToken cancellationToken)
     {
-        if (payload is null || payload.Slide < 1)
+        if (slide < 1)
         {
             return Results.BadRequest(new { error = "slide must be >= 1" });
         }
@@ -355,7 +355,7 @@ internal sealed class DeckWorkflowService
         List<RuleActionRecord> ruleActions;
         try
         {
-            ruleActions = await _supabase.FetchRuleActionsAsync(deckId, settings, cancellationToken, payload.Slide);
+            ruleActions = await _supabase.FetchRuleActionsAsync(deckId, settings, cancellationToken, slide);
         }
         catch (Exception ex)
         {
@@ -387,7 +387,7 @@ internal sealed class DeckWorkflowService
             var pptxPath = Path.Combine(tempRoot, baseName + ".pptx");
             await File.WriteAllBytesAsync(pptxPath, workingBytes, cancellationToken);
 
-            await _converter.ConvertPptxToPdfAsync(pptxPath, tempRoot, cancellationToken, payload.Slide);
+            await _converter.ConvertPptxToPdfAsync(pptxPath, tempRoot, cancellationToken, slide);
 
             var pdfPath = Path.Combine(tempRoot, baseName + ".pdf");
             if (!File.Exists(pdfPath))

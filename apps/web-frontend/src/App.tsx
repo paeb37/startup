@@ -2143,12 +2143,8 @@ function RuleBuilder({ seed }: { seed: BuilderSeed | null }) {
       setPreviewError(null);
 
       try {
-        const response = await fetch(`/api/decks/${deckId}/preview`, {
+        const response = await fetch(`/api/decks/${deckId}/preview?slide=${selectedPage}`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ slide: selectedPage }),
           signal: controller.signal,
         });
 

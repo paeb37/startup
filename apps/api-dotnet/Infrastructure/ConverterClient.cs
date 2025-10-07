@@ -10,28 +10,32 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Dexter.WebApi.Common.Logging;
-using Dexter.WebApi.Infrastructure.Options;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 
 internal sealed class ConverterClient
 {
     private readonly HttpClient _httpClient;
-    private readonly IOptionsMonitor<ConverterOptions> _options;
+    private readonly IConfiguration _configuration;
 
-    public ConverterClient(HttpClient httpClient, IOptionsMonitor<ConverterOptions> options)
+    public ConverterClient(HttpClient httpClient, IConfiguration configuration)
     {
         _httpClient = httpClient;
-        _options = options;
+        _configuration = configuration;
     }
 
     public async Task ConvertPptxToPdfAsync(string inputPath, string outDir, CancellationToken cancellationToken, int? slide = null)
     {
-        var baseUrl = _options.CurrentValue.BaseUrl;
-        if (!string.IsNullOrWhiteSpace(baseUrl))
+        var settings = GetSettings();
+        if (settings.TimeoutSeconds > 0 && _httpClient.Timeout != TimeSpan.FromSeconds(settings.TimeoutSeconds))
+        {
+            _httpClient.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.BaseUrl))
         {
             try
             {
-                await ConvertPptxToPdfRemoteAsync(baseUrl!, inputPath, outDir, cancellationToken, slide);
+                await ConvertPptxToPdfRemoteAsync(settings.BaseUrl!, inputPath, outDir, cancellationToken, slide);
                 return;
             }
             catch (Exception ex)
@@ -41,6 +45,35 @@ internal sealed class ConverterClient
         }
 
         await ConvertPptxToPdfLocalAsync(inputPath, outDir);
+    }
+
+    private (string? BaseUrl, int TimeoutSeconds) GetSettings()
+    {
+        var section = _configuration.GetSection("Converter");
+        var baseUrl = Resolve(section["BaseUrl"], "LIBRE_CONVERTER_URL")?.Trim();
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            baseUrl = baseUrl.TrimEnd('/');
+        }
+
+        var timeoutValue = section["TimeoutSeconds"];
+        if (!int.TryParse(timeoutValue, out var timeout) || timeout <= 0)
+        {
+            timeout = 60;
+        }
+
+        return (baseUrl, timeout);
+    }
+
+    private static string? Resolve(string? current, string envVar)
+    {
+        if (!string.IsNullOrWhiteSpace(current))
+        {
+            return current;
+        }
+
+        var fromEnv = Environment.GetEnvironmentVariable(envVar);
+        return string.IsNullOrWhiteSpace(fromEnv) ? null : fromEnv;
     }
 
     private async Task ConvertPptxToPdfRemoteAsync(string baseUrl, string inputPath, string outDir, CancellationToken cancellationToken, int? slide)

@@ -29,7 +29,7 @@ internal sealed class OpenAiClient
         DeckDto deck,
         string pptxPath,
         Guid deckId,
-        SupabaseSettings settings,
+        SupabaseClient.Settings settings,
         CancellationToken cancellationToken)
     {
         var captionsBySlide = new Dictionary<int, List<string>>();
@@ -96,7 +96,7 @@ internal sealed class OpenAiClient
 
     public async Task GenerateTableSummariesAsync(
         DeckDto deck,
-        SupabaseSettings settings,
+        SupabaseClient.Settings settings,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.OpenAiKey))
@@ -170,7 +170,7 @@ internal sealed class OpenAiClient
         return vector?.ToArray();
     }
 
-    private async Task<string?> RequestImageCaptionAsync(byte[] imageBytes, string contentType, SupabaseSettings settings, CancellationToken cancellationToken)
+    private async Task<string?> RequestImageCaptionAsync(byte[] imageBytes, string contentType, SupabaseClient.Settings settings, CancellationToken cancellationToken)
     {
         if (imageBytes.Length == 0)
         {
@@ -269,7 +269,7 @@ internal sealed class OpenAiClient
         };
     }
 
-    private async Task<string?> RequestTableSummaryAsync(string tableText, SupabaseSettings settings, CancellationToken cancellationToken)
+    private async Task<string?> RequestTableSummaryAsync(string tableText, SupabaseClient.Settings settings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(tableText))
         {

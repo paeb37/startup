@@ -15,54 +15,86 @@ using System.Threading.Tasks;
 using Dexter.WebApi.Common.Logging;
 using Dexter.WebApi.Decks.Models;
 using Dexter.WebApi.Decks.Services;
-using Dexter.WebApi.Infrastructure.Options;
 using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 
 internal sealed class SupabaseClient
 {
     private readonly HttpClient _httpClient;
     private readonly OpenAiClient _openAi;
     private readonly ConverterClient _converter;
-    private readonly IOptionsMonitor<SupabaseOptions> _supabaseOptions;
-    private readonly IOptionsMonitor<OpenAiOptions> _openAiOptions;
+    private readonly IConfiguration _configuration;
 
     public SupabaseClient(
         HttpClient httpClient,
         OpenAiClient openAi,
         ConverterClient converter,
-        IOptionsMonitor<SupabaseOptions> supabaseOptions,
-        IOptionsMonitor<OpenAiOptions> openAiOptions)
+        IConfiguration configuration)
     {
         _httpClient = httpClient;
         _openAi = openAi;
         _converter = converter;
-        _supabaseOptions = supabaseOptions;
-        _openAiOptions = openAiOptions;
+        _configuration = configuration;
     }
 
-    public SupabaseSettings? GetSettings()
+    public Settings? GetSettings()
     {
-        var supabase = _supabaseOptions.CurrentValue;
-        if (!supabase.IsConfigured())
+        var supabaseSection = _configuration.GetSection("Supabase");
+        var url = Resolve(supabaseSection["Url"], "SUPABASE_URL")?.Trim();
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            url = url.TrimEnd('/');
+        }
+
+        var serviceKey = Resolve(supabaseSection["ServiceKey"], "SUPABASE_SERVICE_ROLE_KEY")?.Trim();
+        var storageBucket = (Resolve(supabaseSection["StorageBucket"], "SUPABASE_STORAGE_BUCKET") ?? string.Empty).Trim();
+        var storagePathPrefix = (Resolve(supabaseSection["StoragePathPrefix"], "SUPABASE_STORAGE_PREFIX") ?? string.Empty)
+            .Trim()
+            .Trim('/');
+
+        if (string.IsNullOrWhiteSpace(url)
+            || string.IsNullOrWhiteSpace(serviceKey)
+            || string.IsNullOrWhiteSpace(storageBucket))
         {
             return null;
         }
 
-        var openAi = _openAiOptions.CurrentValue;
+        string NormalizeOrDefault(string? value, string defaultValue)
+            => string.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim();
 
-        return new SupabaseSettings(
-            Url: (supabase.Url ?? string.Empty).TrimEnd('/'),
-            ServiceKey: supabase.ServiceKey!,
-            DecksTable: supabase.DecksTable,
-            SlidesTable: supabase.SlidesTable,
-            RulesTable: supabase.RulesTable,
-            RuleActionsTable: supabase.RuleActionsTable,
-            OpenAiKey: openAi.ApiKey,
-            EmbeddingModel: openAi.EmbeddingModel,
-            StorageBucket: supabase.StorageBucket,
-            StoragePathPrefix: supabase.StoragePathPrefix,
-            VisionModel: openAi.VisionModel);
+        var decksTable = NormalizeOrDefault(supabaseSection["DecksTable"], "decks");
+        var slidesTable = NormalizeOrDefault(supabaseSection["SlidesTable"], "slides");
+        var rulesTable = NormalizeOrDefault(supabaseSection["RulesTable"], "rules");
+        var ruleActionsTable = NormalizeOrDefault(supabaseSection["RuleActionsTable"], "rule_actions");
+
+        var openAiSection = _configuration.GetSection("OpenAI");
+        var openAiKey = Resolve(openAiSection["ApiKey"], "OPENAI_API_KEY")?.Trim();
+        var embeddingModel = NormalizeOrDefault(Resolve(openAiSection["EmbeddingModel"], "OPENAI_EMBEDDING_MODEL"), "text-embedding-3-small");
+        var visionModel = NormalizeOrDefault(Resolve(openAiSection["VisionModel"], "OPENAI_VISION_MODEL"), "gpt-4o-mini");
+
+        return new Settings(
+            Url: url!,
+            ServiceKey: serviceKey!,
+            DecksTable: decksTable,
+            SlidesTable: slidesTable,
+            RulesTable: rulesTable,
+            RuleActionsTable: ruleActionsTable,
+            OpenAiKey: openAiKey,
+            EmbeddingModel: embeddingModel,
+            StorageBucket: storageBucket,
+            StoragePathPrefix: storagePathPrefix,
+            VisionModel: visionModel);
+    }
+
+    private static string? Resolve(string? current, string envVar)
+    {
+        if (!string.IsNullOrWhiteSpace(current))
+        {
+            return current;
+        }
+
+        var fromEnv = Environment.GetEnvironmentVariable(envVar);
+        return string.IsNullOrWhiteSpace(fromEnv) ? null : fromEnv;
     }
 
     public async Task<InitialDeckArtifacts> GenerateInitialArtifactsAsync(
@@ -70,7 +102,7 @@ internal sealed class SupabaseClient
         DeckDto deck,
         string originalFileName,
         Guid deckId,
-        SupabaseSettings settings,
+        Settings settings,
         CancellationToken cancellationToken)
     {
         var totalSw = Stopwatch.StartNew();
@@ -164,7 +196,7 @@ internal sealed class SupabaseClient
         InitialDeckArtifacts artifacts,
         string? industry,
         string? deckType,
-        SupabaseSettings settings,
+        Settings settings,
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
@@ -189,7 +221,7 @@ internal sealed class SupabaseClient
         DeckDto deck,
         string baseName,
         Guid deckId,
-        SupabaseSettings settings,
+        Settings settings,
         JsonSerializerOptions jsonOptions,
         CancellationToken cancellationToken)
     {
@@ -271,7 +303,7 @@ internal sealed class SupabaseClient
         return result;
     }
 
-    public async Task DeleteSlidesForDeckAsync(Guid deckId, SupabaseSettings settings, CancellationToken cancellationToken)
+    public async Task DeleteSlidesForDeckAsync(Guid deckId, Settings settings, CancellationToken cancellationToken)
     {
         var requestUri = $"{settings.Url}/rest/v1/{settings.SlidesTable}?deck_id=eq.{deckId}";
         using var request = new HttpRequestMessage(HttpMethod.Delete, requestUri);
@@ -296,7 +328,7 @@ internal sealed class SupabaseClient
         DeckDto deck,
         Guid deckId,
         Dictionary<int, List<string>> imageCaptions,
-        SupabaseSettings settings,
+        Settings settings,
         CancellationToken cancellationToken)
     {
         var totalSw = Stopwatch.StartNew();
@@ -320,19 +352,19 @@ internal sealed class SupabaseClient
 
             // COMMENTED OUT: Embeddings generation (speeds up upload)
             float[]? embedding = null;
-            // if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(combined))
-            // {
-            //     embeddingAttempts++;
-            //     embedding = await _openAi.TryGenerateEmbeddingAsync(
-            //         combined,
-            //         settings.OpenAiKey!,
-            //         settings.EmbeddingModel,
-            //         cancellationToken);
-            //     if (embedding != null)
-            //     {
-            //         embeddingSuccess++;
-            //     }
-            // }
+            if (!string.IsNullOrWhiteSpace(settings.OpenAiKey) && !string.IsNullOrWhiteSpace(combined))
+            {
+                embeddingAttempts++;
+                embedding = await _openAi.TryGenerateEmbeddingAsync(
+                    combined,
+                    settings.OpenAiKey!,
+                    settings.EmbeddingModel,
+                    cancellationToken);
+                if (embedding != null)
+                {
+                    embeddingSuccess++;
+                }
+            }
 
             slidePayload.Add(new
             {
@@ -359,7 +391,7 @@ internal sealed class SupabaseClient
         string redactedPdfPath,
         string redactedJsonPath,
         int slideCount,
-        SupabaseSettings settings,
+        Settings settings,
         CancellationToken cancellationToken)
     {
         var payload = new
@@ -391,7 +423,7 @@ internal sealed class SupabaseClient
         OperationTimer.LogTiming("supabase deck update", elapsed, deckId.ToString("n"));
     }
 
-    public async Task<string?> FetchDeckPdfInfoAsync(Guid deckId, SupabaseSettings settings, CancellationToken cancellationToken)
+    public async Task<string?> FetchDeckPdfInfoAsync(Guid deckId, Settings settings, CancellationToken cancellationToken)
     {
         var query = new Dictionary<string, string?>
         {
@@ -433,7 +465,7 @@ internal sealed class SupabaseClient
 
     public async Task<DeckRecord?> FetchDeckRecordAsync(
         Guid deckId,
-        SupabaseSettings settings,
+        Settings settings,
         CancellationToken cancellationToken)
     {
         var query = new Dictionary<string, string?>
@@ -476,7 +508,7 @@ internal sealed class SupabaseClient
     */
     public async Task<List<RuleActionRecord>> FetchRuleActionsAsync(
         Guid deckId,
-        SupabaseSettings settings,
+        Settings settings,
         CancellationToken cancellationToken,
         int? slideFilter = null)
     {
@@ -511,7 +543,7 @@ internal sealed class SupabaseClient
     }
 
     public async Task<byte[]?> DownloadObjectAsync(
-        SupabaseSettings settings,
+        Settings settings,
         string objectPath,
         CancellationToken cancellationToken)
     {
@@ -546,7 +578,7 @@ internal sealed class SupabaseClient
     }
 
     public async Task<string?> CreateSignedUrlAsync(
-        SupabaseSettings settings,
+        Settings settings,
         string objectPath,
         int expiresInSeconds,
         CancellationToken cancellationToken)
@@ -583,7 +615,7 @@ internal sealed class SupabaseClient
     private async Task<string> UploadToSupabaseStorageAsync(
         string localFilePath,
         string contentType,
-        SupabaseSettings settings,
+        Settings settings,
         string objectPath,
         CancellationToken cancellationToken)
     {
@@ -619,7 +651,7 @@ internal sealed class SupabaseClient
     }
 
     private async Task PostgrestInsertAsync(
-        SupabaseSettings settings,
+        Settings settings,
         string table,
         object payload,
         bool returnRepresentation,
@@ -675,4 +707,17 @@ internal sealed class SupabaseClient
             // best effort cleanup
         }
     }
+
+    internal sealed record Settings(
+        string Url,
+        string ServiceKey,
+        string DecksTable,
+        string SlidesTable,
+        string RulesTable,
+        string RuleActionsTable,
+        string? OpenAiKey,
+        string EmbeddingModel,
+        string StorageBucket,
+        string StoragePathPrefix,
+        string VisionModel);
 }

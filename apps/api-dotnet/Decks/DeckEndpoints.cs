@@ -17,8 +17,8 @@ internal static class DeckEndpoints
         app.MapGet("/api/decks", async (HttpRequest request, DeckWorkflowService workflow, CancellationToken cancellationToken)
             => await workflow.GetDecksAsync(request, cancellationToken));
 
-        app.MapPost("/api/decks/{deckId:guid}/preview", async (Guid deckId, PreviewRequest? payload, DeckWorkflowService workflow, CancellationToken cancellationToken)
-            => await workflow.PreviewDeckAsync(deckId, payload, cancellationToken));
+        app.MapPost("/api/decks/{deckId:guid}/preview", async (Guid deckId, int slide, DeckWorkflowService workflow, CancellationToken cancellationToken)
+            => await workflow.PreviewDeckAsync(deckId, slide, cancellationToken));
 
         app.MapPost("/api/decks/{deckId:guid}/redact", async (Guid deckId, DeckWorkflowService workflow, CancellationToken cancellationToken)
             => await workflow.RedactDeckAsync(deckId, cancellationToken));
