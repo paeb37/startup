@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from deps import (
+from app import (
     DEFAULT_MODEL,
     EMBEDDING_MODEL,
     SLIDE_IMAGE_BASE,

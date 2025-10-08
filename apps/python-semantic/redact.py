@@ -8,7 +8,7 @@ import re
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 
-from deps import (
+from app import (
     DEFAULT_MODEL,
     SUPABASE_RULES_TABLE,
     SUPABASE_RULE_ACTIONS_TABLE,
